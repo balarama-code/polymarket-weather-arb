@@ -185,7 +185,28 @@ class Executor:
 
     def get_state(self) -> dict:
         """Full portfolio state for dashboard."""
+        import numpy as np
+        from config import MAX_POSITION_SIZE, KELLY_FRACTION, MAX_EXPOSURE
+
+        equity = round(self.capital + self.exposure, 2)
+
+        # Real Kelly f calculation from recent trades
+        if self.total_trades > 0 and self.win_rate > 0:
+            avg_win = np.mean([t.pnl for t in self.trade_history if t.pnl > 0]) if self.winning_trades > 0 else 0
+            avg_loss = abs(np.mean([t.pnl for t in self.trade_history if t.pnl <= 0])) if (self.total_trades - self.winning_trades) > 0 else 1
+            win_p = self.win_rate / 100
+            b = avg_win / avg_loss if avg_loss > 0 else 1
+            kelly_raw = (b * win_p - (1 - win_p)) / b if b > 0 else 0
+            kelly_f = round(max(0, kelly_raw * KELLY_FRACTION * equity), 2)
+        else:
+            kelly_f = round(KELLY_FRACTION * equity * 0.1, 2)
+
+        # Real wx_confidence from model agreement on active positions
+        confidences = [pos.confidence for pos in self.positions.values()]
+        wx_confidence = round(np.mean(confidences) * 100, 0) if confidences else 0
+
         return {
+            "equity": equity,
             "capital": round(self.capital, 2),
             "total_pnl": round(self.total_pnl, 2),
             "today_pnl": round(self.today_pnl, 2),
@@ -193,9 +214,17 @@ class Executor:
             "win_rate": round(self.win_rate, 1),
             "sharpe": self.sharpe,
             "exposure": round(self.exposure_pct, 1),
+            "exposure_usd": round(self.exposure, 2),
             "drawdown": self.drawdown_pct,
             "daily_var": round(self.daily_var / self.initial_capital * 100, 1) if self.daily_var else 0,
+            "daily_var_usd": round(self.daily_var, 2),
             "total_trades": self.total_trades,
+            "winning_trades": self.winning_trades,
+            "kelly_f": kelly_f,
+            "max_pos": MAX_POSITION_SIZE,
+            "max_exposure": MAX_EXPOSURE * 100,
+            "wx_confidence": wx_confidence,
+            "initial_capital": self.initial_capital,
             "positions": {k: v.to_dict() for k, v in self.positions.items()},
             "recent_trades": [t.to_dict() for t in self.trade_history[-10:]],
             "equity_curve": self.equity_curve[-200:],

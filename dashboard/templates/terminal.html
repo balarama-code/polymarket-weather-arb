@@ -323,12 +323,20 @@
       <span class="stat-value green" id="total-pnl">+$0.00</span>
     </div>
     <div class="stat-row">
+      <span class="stat-label">today_pnl</span>
+      <span class="stat-value green" id="today-pnl">+$0.00</span>
+    </div>
+    <div class="stat-row">
       <span class="stat-label">today</span>
       <span class="stat-value cyan" id="today-trades">0 trades</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">win_rate</span>
       <span class="stat-value green" id="win-rate">0%</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">trades</span>
+      <span class="stat-value cyan" id="total-trades">0 / 0</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">sharpe</span>
@@ -463,25 +471,27 @@ function initCharts() {
   });
 }
 
-// Sentiment scatter
-function drawSentiment() {
+// Sentiment scatter — reflects real win_rate as bull/bear ratio
+let lastWinRate = 50;
+function drawSentiment(winRate) {
+  if (winRate !== undefined) lastWinRate = winRate;
   const canvas = document.getElementById('sentiment-canvas');
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#0a0a0f';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  const bullRatio = lastWinRate / 100;
   for (let i = 0; i < 60; i++) {
     const x = Math.random() * canvas.width;
     const y = Math.random() * canvas.height;
     const r = Math.random() * 4 + 1;
-    const isBull = Math.random() > 0.45;
+    const isBull = Math.random() < bullRatio;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = isBull ? `rgba(0,255,136,${Math.random()*0.5+0.2})` : `rgba(255,68,102,${Math.random()*0.3+0.1})`;
     ctx.fill();
   }
 
-  // Labels
   ctx.font = '9px JetBrains Mono';
   ctx.fillStyle = '#00ff88';
   ctx.fillText('● BULL', 10, canvas.height - 10);
@@ -517,30 +527,36 @@ function poll() {
 
       const p = data.portfolio || {};
 
-      // Portfolio
-      const equity = (p.capital || 100) + (p.exposure ? p.capital * p.exposure / 100 : 0);
-      document.getElementById('total-equity').textContent = '$' + (equity || 100).toFixed(2);
+      // Portfolio — all from real executor data
+      const equity = p.equity || p.capital || 100;
+      document.getElementById('total-equity').textContent = '$' + equity.toFixed(2);
 
       const pnl = p.total_pnl || 0;
       const pnlEl = document.getElementById('total-pnl');
       pnlEl.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
       pnlEl.className = 'stat-value ' + (pnl >= 0 ? 'green' : 'red');
 
+      const todayPnl = p.today_pnl || 0;
+      const todayPnlEl = document.getElementById('today-pnl');
+      todayPnlEl.textContent = (todayPnl >= 0 ? '+$' : '-$') + Math.abs(todayPnl).toFixed(2);
+      todayPnlEl.className = 'stat-value ' + (todayPnl >= 0 ? 'green' : 'red');
+
       document.getElementById('today-trades').textContent = (p.today_trades || 0) + ' trades';
       document.getElementById('win-rate').textContent = (p.win_rate || 0).toFixed(1) + '%';
+      document.getElementById('total-trades').textContent = (p.winning_trades || 0) + 'W / ' + (p.total_trades || 0) + 'T';
       document.getElementById('sharpe').textContent = (p.sharpe || 0).toFixed(2);
 
-      // Risk bars
-      setBar('exposure', p.exposure || 0, 50);
+      // Risk bars — real data
+      setBar('exposure', p.exposure || 0, p.max_exposure || 30);
       setBar('drawdown', p.drawdown || 0, 20);
       setBar('var', p.daily_var || 0, 10);
       setBar('wxcorr', (data.wx_correlation || 0) * 100, 100);
       document.getElementById('val-wxcorr').textContent = (data.wx_correlation || 0).toFixed(2);
 
-      // Position sizing
-      document.getElementById('kelly-f').textContent = '$' + ((p.capital || 100) * 0.25 * 0.03).toFixed(2);
-      document.getElementById('max-pos').textContent = '$10.00';
-      document.getElementById('wx-conf').textContent = Math.round(50 + Math.random() * 30) + '%';
+      // Position sizing — real Kelly, max_pos, wx_confidence from executor
+      document.getElementById('kelly-f').textContent = '$' + (p.kelly_f || 0).toFixed(2);
+      document.getElementById('max-pos').textContent = '$' + (p.max_pos || 10).toFixed(2);
+      document.getElementById('wx-conf').textContent = (p.wx_confidence || 0).toFixed(0) + '%';
 
       // Live feed
       const feedEl = document.getElementById('live-feed');
@@ -595,7 +611,7 @@ function poll() {
         </div>`;
       }).join('');
 
-      // Active positions
+      // Active positions — real data with entry price and size
       const posEl = document.getElementById('active-positions');
       const positions = p.positions || {};
       posEl.innerHTML = Object.entries(positions).map(([name, pos]) =>
@@ -603,6 +619,7 @@ function poll() {
           <span class="feed-action fired">${pos.side}</span>
           <span class="feed-contract">${name}</span>
           <span style="color:#556">@${pos.entry_price.toFixed(2)}</span>
+          <span style="color:#00ccff;margin-left:auto">$${pos.size.toFixed(2)}</span>
         </div>`
       ).join('') || '<div style="color:#334">No active positions</div>';
 
@@ -628,7 +645,7 @@ function poll() {
       }
 
       drawLatency();
-      drawSentiment();
+      drawSentiment(p.win_rate || 50);
     })
     .catch(() => {});
 }
