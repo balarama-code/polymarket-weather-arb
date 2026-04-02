@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FORECAST ARB ENGINE v7.3</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0f;
+    color: #8892a0;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-x: hidden;
+  }
+
+  /* TOP BAR */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: #0d0d15;
+    border-bottom: 1px solid #1a1a2e;
+  }
+  .topbar .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot-online {
+    width: 8px; height: 8px;
+    background: #00ff88;
+    border-radius: 50%;
+    box-shadow: 0 0 6px #00ff88;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .topbar .label { color: #ff4466; font-weight: 700; text-transform: uppercase; font-size: 12px; }
+  .topbar .title { color: #ffffff; font-weight: 700; font-size: 13px; letter-spacing: 1px; }
+  .topbar .meta { color: #556; font-size: 10px; }
+  .topbar .cycle { color: #00ccff; font-weight: 500; }
+  .topbar .strat { color: #aa66ff; }
+
+  /* MAIN GRID */
+  .grid {
+    display: grid;
+    grid-template-columns: 280px 1fr 300px;
+    grid-template-rows: auto auto auto 1fr;
+    gap: 1px;
+    background: #111;
+    min-height: calc(100vh - 40px);
+  }
+
+  .panel {
+    background: #0a0a0f;
+    padding: 10px 12px;
+    border: 1px solid #1a1a2e;
+    position: relative;
+  }
+  .panel-header {
+    color: #445;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+  .panel-header::before { content: "// "; color: #334; }
+
+  /* LIVE FEED */
+  .feed-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    font-size: 10px;
+  }
+  .feed-action {
+    font-weight: 700;
+    min-width: 48px;
+    text-transform: uppercase;
+  }
+  .feed-action.fired { color: #00ff88; }
+  .feed-action.fired::before { content: "● "; }
+  .feed-action.scan { color: #556; }
+  .feed-action.scan::before { content: "● "; }
+  .feed-action.closed { color: #ffaa00; }
+  .feed-action.closed::before { content: "● "; }
+  .feed-contract { color: #ccd; }
+  .feed-pnl { min-width: 55px; text-align: right; }
+  .feed-pnl.pos { color: #00ff88; }
+  .feed-pnl.neg { color: #ff4466; }
+  .feed-status { color: #556; margin-left: auto; font-size: 9px; }
+
+  /* PORTFOLIO */
+  .big-number {
+    font-size: 28px;
+    font-weight: 700;
+    color: #00ccff;
+    text-shadow: 0 0 20px rgba(0,204,255,0.3);
+    margin: 4px 0 12px;
+  }
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+  }
+  .stat-label { color: #556; }
+  .stat-value { font-weight: 500; }
+  .stat-value.green { color: #00ff88; }
+  .stat-value.red { color: #ff4466; }
+  .stat-value.cyan { color: #00ccff; }
+  .stat-value.yellow { color: #ffaa00; }
+
+  /* PROGRESS BARS */
+  .bar-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 3px 0;
+  }
+  .bar-label { color: #556; min-width: 100px; font-size: 10px; }
+  .bar-track {
+    flex: 1;
+    height: 4px;
+    background: #1a1a2e;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+  .bar-fill.green { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+  .bar-fill.cyan { background: #00ccff; box-shadow: 0 0 6px #00ccff; }
+  .bar-fill.yellow { background: #ffaa00; box-shadow: 0 0 6px #ffaa00; }
+  .bar-fill.purple { background: #aa66ff; box-shadow: 0 0 6px #aa66ff; }
+  .bar-value { color: #8892a0; min-width: 45px; text-align: right; font-size: 10px; }
+
+  /* MODEL STATUS */
+  .model-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+    font-size: 10px;
+  }
+  .model-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #00ff88;
+    box-shadow: 0 0 4px #00ff88;
+  }
+  .model-name { color: #00ff88; min-width: 50px; font-weight: 500; }
+  .model-latency { color: #556; min-width: 50px; }
+  .model-acc { color: #8892a0; margin-left: auto; }
+
+  /* EXECUTION LOG */
+  .log-line {
+    font-size: 10px;
+    color: #556;
+    padding: 1px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .log-time { color: #334; }
+
+  /* WEATHER TRIGGERS */
+  .trigger-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    font-size: 10px;
+  }
+  .trigger-name { color: #556; }
+  .trigger-name::before { content: "◆ "; color: #00ccff; }
+  .trigger-value { color: #00ccff; font-weight: 500; }
+
+  /* EQUITY CURVE */
+  .chart-container {
+    width: 100%;
+    height: 200px;
+    position: relative;
+    margin-top: 8px;
+  }
+  canvas { width: 100% !important; height: 100% !important; }
+
+  /* RECENT TRADES */
+  .trade-row {
+    font-size: 10px;
+    padding: 2px 0;
+    display: flex;
+    gap: 8px;
+  }
+  .trade-time { color: #334; min-width: 60px; }
+  .trade-pnl { font-weight: 500; min-width: 50px; }
+
+  /* FEED LATENCY BAR */
+  .latency-bar {
+    display: flex;
+    gap: 2px;
+    margin-top: 6px;
+    height: 16px;
+    align-items: flex-end;
+  }
+  .latency-tick {
+    width: 4px;
+    background: #00ff88;
+    border-radius: 1px;
+    transition: height 0.3s;
+  }
+  .latency-tick.warn { background: #ffaa00; }
+  .latency-tick.bad { background: #ff4466; }
+
+  /* BUTTONS */
+  .btn-row {
+    display: flex;
+    gap: 4px;
+    margin: 8px 0;
+  }
+  .btn {
+    padding: 3px 10px;
+    font-size: 9px;
+    font-family: inherit;
+    font-weight: 700;
+    text-transform: uppercase;
+    border: none;
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .btn-green { background: #00ff88; color: #000; }
+  .btn-cyan { background: #00ccff; color: #000; }
+  .btn-purple { background: #aa66ff; color: #000; }
+  .btn-yellow { background: #ffaa00; color: #000; }
+  .btn-red { background: #ff4466; color: #000; }
+
+  /* PRICE ACTION mini chart */
+  .mini-chart {
+    height: 100px;
+    position: relative;
+    margin-top: 4px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #0a0a0f; }
+  ::-webkit-scrollbar-thumb { background: #1a1a2e; border-radius: 2px; }
+
+  /* Responsive */
+  @media (max-width: 1200px) {
+    .grid { grid-template-columns: 250px 1fr 250px; }
+  }
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="status">
+    <div class="dot-online"></div>
+    <span class="label">SYSTEM ONLINE</span>
+    <span class="title">FORECAST ARB ENGINE v7.3</span>
+  </div>
+  <div class="meta">
+    <span id="uptime">00:00:00</span>&nbsp;&nbsp;
+    <span class="cycle">CYCLE #<span id="cycle-num">0</span></span>&nbsp;&nbsp;
+    <span>SCAN</span>
+  </div>
+  <div class="meta">
+    pid: 0x<span id="pid">F7A32</span> | strat: <span class="strat" id="strat-name">FORECAST_ARB</span>
+  </div>
+</div>
+
+<!-- MAIN GRID -->
+<div class="grid">
+
+  <!-- LEFT COL: LIVE FEED -->
+  <div class="panel" style="grid-row: span 2;">
+    <div class="panel-header">Live Feed — Forecast Arbitrage</div>
+    <div id="live-feed"></div>
+
+    <div class="panel-header" style="margin-top: 16px;">Weather Triggers</div>
+    <div id="weather-triggers"></div>
+
+    <div class="btn-row">
+      <span class="btn btn-green">INGEST</span>
+      <span class="btn btn-cyan">PARSE</span>
+      <span class="btn btn-purple">RANK</span>
+      <span class="btn btn-yellow">HEDGE</span>
+      <span class="btn btn-red">EXEC</span>
+    </div>
+
+    <div class="panel-header" style="margin-top: 8px;">Execution Log</div>
+    <div id="exec-log" style="max-height: 150px; overflow-y: auto;"></div>
+
+    <div class="panel-header" style="margin-top: 12px;">Model Status</div>
+    <div id="model-status"></div>
+
+    <div class="panel-header" style="margin-top: 12px;">Feed Latency</div>
+    <div class="latency-bar" id="latency-bar"></div>
+  </div>
+
+  <!-- CENTER: PORTFOLIO -->
+  <div class="panel">
+    <div class="panel-header">Portfolio</div>
+    <div class="big-number" id="total-equity">$100.00</div>
+
+    <div class="stat-row">
+      <span class="stat-label">total_pnl</span>
+      <span class="stat-value green" id="total-pnl">+$0.00</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">today</span>
+      <span class="stat-value cyan" id="today-trades">0 trades</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">win_rate</span>
+      <span class="stat-value green" id="win-rate">0%</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">sharpe</span>
+      <span class="stat-value cyan" id="sharpe">0.00</span>
+    </div>
+
+    <div class="panel-header" style="margin-top: 14px;">Risk</div>
+    <div class="bar-container">
+      <span class="bar-label">exposure</span>
+      <div class="bar-track"><div class="bar-fill green" id="bar-exposure" style="width:0%"></div></div>
+      <span class="bar-value" id="val-exposure">0%</span>
+    </div>
+    <div class="bar-container">
+      <span class="bar-label">drawdown</span>
+      <div class="bar-track"><div class="bar-fill yellow" id="bar-drawdown" style="width:0%"></div></div>
+      <span class="bar-value" id="val-drawdown">0%</span>
+    </div>
+    <div class="bar-container">
+      <span class="bar-label">daily_var</span>
+      <div class="bar-track"><div class="bar-fill purple" id="bar-var" style="width:0%"></div></div>
+      <span class="bar-value" id="val-var">0%</span>
+    </div>
+    <div class="bar-container">
+      <span class="bar-label">wx_correlation</span>
+      <div class="bar-track"><div class="bar-fill cyan" id="bar-wxcorr" style="width:0%"></div></div>
+      <span class="bar-value" id="val-wxcorr">0.00</span>
+    </div>
+
+    <div class="panel-header" style="margin-top: 14px;">Position Sizing</div>
+    <div class="stat-row">
+      <span class="stat-label">kelly_f</span>
+      <span class="stat-value green" id="kelly-f">$0.00</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">max_pos</span>
+      <span class="stat-value cyan" id="max-pos">$10.00</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">wx_confidence</span>
+      <span class="stat-value yellow" id="wx-conf">0%</span>
+    </div>
+
+    <div class="panel-header" style="margin-top: 14px;">Recent Trades</div>
+    <div id="recent-trades"></div>
+  </div>
+
+  <!-- RIGHT COL: CHARTS -->
+  <div class="panel" style="grid-row: span 2;">
+    <div class="panel-header">Price Action — Weather Derivatives</div>
+    <div class="mini-chart">
+      <canvas id="price-chart"></canvas>
+    </div>
+
+    <div class="panel-header" style="margin-top: 16px;">Active Positions</div>
+    <div id="active-positions" style="max-height: 150px; overflow-y: auto;"></div>
+
+    <div class="panel-header" style="margin-top: 16px;">Sentiment Field — Model Consensus</div>
+    <canvas id="sentiment-canvas" width="260" height="120" style="margin-top:4px;"></canvas>
+  </div>
+
+  <!-- BOTTOM CENTER: EQUITY CURVE -->
+  <div class="panel">
+    <div class="panel-header">Equity Curve</div>
+    <div class="chart-container">
+      <canvas id="equity-chart"></canvas>
+    </div>
+  </div>
+
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<script>
+// Charts
+let equityChart, priceChart;
+
+function initCharts() {
+  const eqCtx = document.getElementById('equity-chart').getContext('2d');
+  equityChart = new Chart(eqCtx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: '#00ccff',
+        borderWidth: 1.5,
+        fill: true,
+        backgroundColor: 'rgba(0,204,255,0.05)',
+        pointRadius: 0,
+        tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: {
+          grid: { color: '#1a1a2e' },
+          ticks: { color: '#556', font: { family: 'JetBrains Mono', size: 9 } },
+        }
+      }
+    }
+  });
+
+  const prCtx = document.getElementById('price-chart').getContext('2d');
+  priceChart = new Chart(prCtx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: '#aa66ff',
+        borderWidth: 1,
+        fill: false,
+        pointRadius: 0,
+        tension: 0.4,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: {
+          grid: { color: '#1a1a2e' },
+          ticks: { color: '#556', font: { family: 'JetBrains Mono', size: 9 } },
+        }
+      }
+    }
+  });
+}
+
+// Sentiment scatter
+function drawSentiment() {
+  const canvas = document.getElementById('sentiment-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let i = 0; i < 60; i++) {
+    const x = Math.random() * canvas.width;
+    const y = Math.random() * canvas.height;
+    const r = Math.random() * 4 + 1;
+    const isBull = Math.random() > 0.45;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = isBull ? `rgba(0,255,136,${Math.random()*0.5+0.2})` : `rgba(255,68,102,${Math.random()*0.3+0.1})`;
+    ctx.fill();
+  }
+
+  // Labels
+  ctx.font = '9px JetBrains Mono';
+  ctx.fillStyle = '#00ff88';
+  ctx.fillText('● BULL', 10, canvas.height - 10);
+  ctx.fillStyle = '#ff4466';
+  ctx.fillText('● BEAR', 70, canvas.height - 10);
+  ctx.fillStyle = '#556';
+  ctx.fillText('● NEXT', 130, canvas.height - 10);
+  ctx.fillStyle = '#ffaa00';
+  ctx.fillText('CONSENSUS-ARM', canvas.width - 100, canvas.height - 10);
+}
+
+// Latency bar
+function drawLatency() {
+  const bar = document.getElementById('latency-bar');
+  bar.innerHTML = '';
+  for (let i = 0; i < 30; i++) {
+    const h = Math.random() * 14 + 2;
+    const tick = document.createElement('div');
+    tick.className = 'latency-tick' + (h > 12 ? ' warn' : '') + (h > 15 ? ' bad' : '');
+    tick.style.height = h + 'px';
+    bar.appendChild(tick);
+  }
+}
+
+// Poll state
+function poll() {
+  fetch('/api/state')
+    .then(r => r.json())
+    .then(data => {
+      // Topbar
+      document.getElementById('uptime').textContent = data.uptime || '00:00:00';
+      document.getElementById('cycle-num').textContent = data.cycle;
+
+      const p = data.portfolio || {};
+
+      // Portfolio
+      const equity = (p.capital || 100) + (p.exposure ? p.capital * p.exposure / 100 : 0);
+      document.getElementById('total-equity').textContent = '$' + (equity || 100).toFixed(2);
+
+      const pnl = p.total_pnl || 0;
+      const pnlEl = document.getElementById('total-pnl');
+      pnlEl.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+      pnlEl.className = 'stat-value ' + (pnl >= 0 ? 'green' : 'red');
+
+      document.getElementById('today-trades').textContent = (p.today_trades || 0) + ' trades';
+      document.getElementById('win-rate').textContent = (p.win_rate || 0).toFixed(1) + '%';
+      document.getElementById('sharpe').textContent = (p.sharpe || 0).toFixed(2);
+
+      // Risk bars
+      setBar('exposure', p.exposure || 0, 50);
+      setBar('drawdown', p.drawdown || 0, 20);
+      setBar('var', p.daily_var || 0, 10);
+      setBar('wxcorr', (data.wx_correlation || 0) * 100, 100);
+      document.getElementById('val-wxcorr').textContent = (data.wx_correlation || 0).toFixed(2);
+
+      // Position sizing
+      document.getElementById('kelly-f').textContent = '$' + ((p.capital || 100) * 0.25 * 0.03).toFixed(2);
+      document.getElementById('max-pos').textContent = '$10.00';
+      document.getElementById('wx-conf').textContent = Math.round(50 + Math.random() * 30) + '%';
+
+      // Live feed
+      const feedEl = document.getElementById('live-feed');
+      feedEl.innerHTML = (data.live_feed || []).map(f => {
+        const pnlClass = f.pnl > 0 ? 'pos' : (f.pnl < 0 ? 'neg' : '');
+        const pnlStr = f.pnl !== 0 ? (f.pnl > 0 ? '+$' : '-$') + Math.abs(f.pnl).toFixed(2) : '';
+        return `<div class="feed-item">
+          <span class="feed-action ${f.action.toLowerCase()}">${f.action}</span>
+          <span class="feed-contract">${f.contract}</span>
+          <span class="feed-pnl ${pnlClass}">${pnlStr}</span>
+          <span class="feed-status">${f.status}</span>
+        </div>`;
+      }).join('');
+
+      // Weather triggers
+      const trigEl = document.getElementById('weather-triggers');
+      const trig = data.weather_triggers || {};
+      trigEl.innerHTML = Object.entries(trig).map(([k,v]) =>
+        `<div class="trigger-row">
+          <span class="trigger-name">${k}</span>
+          <span class="trigger-value">${typeof v === 'number' ? v.toFixed(1) : v}</span>
+        </div>`
+      ).join('');
+
+      // Execution log
+      const logEl = document.getElementById('exec-log');
+      logEl.innerHTML = (data.execution_log || []).map(l =>
+        `<div class="log-line">${l}</div>`
+      ).join('');
+
+      // Model status
+      const modEl = document.getElementById('model-status');
+      const models = data.model_status || {};
+      modEl.innerHTML = Object.entries(models).map(([name, m]) =>
+        `<div class="model-row">
+          <div class="model-dot"></div>
+          <span class="model-name">${name}</span>
+          <span class="model-latency">${m.latency_ms}ms</span>
+          <span class="model-acc">${m.accuracy}%</span>
+        </div>`
+      ).join('');
+
+      // Recent trades
+      const rtEl = document.getElementById('recent-trades');
+      rtEl.innerHTML = ((p.recent_trades || []).slice(-5)).map(t => {
+        const pnlC = t.pnl > 0 ? 'green' : (t.pnl < 0 ? 'red' : '');
+        const pnlS = t.pnl > 0 ? '+' + t.pnl.toFixed(1) : t.pnl.toFixed(1);
+        return `<div class="trade-row">
+          <span class="trade-time">${t.close_time || t.open_time}</span>
+          <span class="trade-pnl" style="color:${t.pnl>=0?'#00ff88':'#ff4466'}">${pnlS}</span>
+          <span style="color:#8892a0">${t.contract}</span>
+        </div>`;
+      }).join('');
+
+      // Active positions
+      const posEl = document.getElementById('active-positions');
+      const positions = p.positions || {};
+      posEl.innerHTML = Object.entries(positions).map(([name, pos]) =>
+        `<div class="feed-item">
+          <span class="feed-action fired">${pos.side}</span>
+          <span class="feed-contract">${name}</span>
+          <span style="color:#556">@${pos.entry_price.toFixed(2)}</span>
+        </div>`
+      ).join('') || '<div style="color:#334">No active positions</div>';
+
+      // Equity curve
+      const eq = p.equity_curve || [];
+      if (eq.length > 1 && equityChart) {
+        equityChart.data.labels = eq.map((_, i) => i);
+        equityChart.data.datasets[0].data = eq.map(e => e[1]);
+        equityChart.update('none');
+      }
+
+      // Price chart (simulated price action)
+      if (priceChart) {
+        const len = priceChart.data.datasets[0].data.length;
+        const last = len > 0 ? priceChart.data.datasets[0].data[len-1] : 100;
+        priceChart.data.labels.push(len);
+        priceChart.data.datasets[0].data.push(last + (Math.random() - 0.48) * 2);
+        if (priceChart.data.labels.length > 100) {
+          priceChart.data.labels.shift();
+          priceChart.data.datasets[0].data.shift();
+        }
+        priceChart.update('none');
+      }
+
+      drawLatency();
+      drawSentiment();
+    })
+    .catch(() => {});
+}
+
+function setBar(name, value, max) {
+  const pct = Math.min(value / max * 100, 100);
+  document.getElementById('bar-' + name).style.width = pct + '%';
+  document.getElementById('val-' + name).textContent = value.toFixed(1) + '%';
+}
+
+// Init
+initCharts();
+drawSentiment();
+drawLatency();
+setInterval(poll, 2000);
+poll();
+
+// Random PID
+document.getElementById('pid').textContent = Math.random().toString(16).slice(2,7).toUpperCase();
+</script>
+</body>
+</html>
