@@ -19,6 +19,7 @@ from engine.weather import fetch_all_forecasts, calc_weather_triggers, calc_mode
 from engine.polymarket_real import get_live_weather_markets, calc_forecast_edge, parse_market
 from engine.markets import MarketSimulator
 from engine.data_logger import log_odds, log_forecasts, log_trade, get_logged_stats
+from engine.live_trader import LiveTrader, check_env
 from engine.strategy import ForecastArbStrategy
 from engine.executor import Executor
 from config import INITIAL_CAPITAL, WEATHER_MODELS, CITIES
@@ -44,6 +45,7 @@ engine_state = {
 
 executor = Executor(INITIAL_CAPITAL)
 strategy = ForecastArbStrategy(INITIAL_CAPITAL)
+live_trader = None  # Set when ENGINE_MODE=LIVE
 
 # City name mapping (Polymarket name → Open-Meteo coords)
 CITY_COORDS = {
@@ -124,8 +126,27 @@ def get_forecast_for_city(city_name: str, forecasts: dict) -> float:
 
 def engine_loop():
     """Main engine loop — runs in background thread."""
+    global live_trader
+
     engine_state["running"] = True
     engine_state["start_time"] = datetime.utcnow().isoformat()
+
+    # Check if live mode
+    is_live = os.environ.get("ENGINE_MODE") == "LIVE"
+    if is_live:
+        engine_state["mode"] = "LIVE"
+        add_log("*** LIVE MODE — REAL MONEY ***")
+        live_trader = LiveTrader()
+        if live_trader.connect():
+            balance = live_trader.get_balance()
+            add_log(f"wallet connected, balance: ${balance:.2f} USDC")
+            add_log(f"max position: ${live_trader.max_position}")
+        else:
+            add_log("ERROR: wallet connection failed, falling back to DRY RUN")
+            engine_state["mode"] = "DRY_RUN"
+            is_live = False
+    else:
+        engine_state["mode"] = "DRY_RUN"
 
     add_log("wx engine init...")
     add_log(f"loaded {len(WEATHER_MODELS)} forecast models")
@@ -238,12 +259,31 @@ def engine_loop():
                     if trade:
                         add_feed("FIRED", short_name, 0, f"{opp['side']} edge:{opp['edge']:.0%}")
                         add_log(f"trade fired: {short_name} {opp['side']} @ {opp['market_prob']:.2f}")
+
+                        # LIVE: execute real order on Polymarket
+                        if is_live and live_trader and live_trader.connected:
+                            cond_id = opp.get("condition_id", "")
+                            if cond_id:
+                                market_info = live_trader.get_market_info(cond_id)
+                                tokens = market_info.get("tokens", [])
+                                if tokens:
+                                    token_id = tokens[0].get("token_id", "")
+                                    if opp["side"] == "YES":
+                                        result = live_trader.buy_yes(token_id, sig.size, opp["market_prob"])
+                                    else:
+                                        result = live_trader.buy_no(token_id, sig.size, opp["market_prob"])
+
+                                    if "error" in result:
+                                        add_log(f"LIVE ORDER FAILED: {result['error'][:50]}")
+                                    else:
+                                        add_log(f"LIVE ORDER OK: {short_name} {opp['side']}")
+
                         # LOG trade open
                         log_trade(cycle, {
                             "contract": short_name, "side": opp["side"],
                             "entry_price": opp["market_prob"], "size": sig.size,
                             "edge": opp["abs_edge"], "confidence": sig.confidence,
-                            "status": "open",
+                            "status": "open" if not is_live else "live_open",
                         })
 
             # 5. Check exits — simulate convergence on existing positions

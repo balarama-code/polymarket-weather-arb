@@ -4,7 +4,7 @@ Forecast Arb Engine — Configuration
 
 # Capital
 INITIAL_CAPITAL = 100.0       # Dry-run starting capital (USD)
-MAX_POSITION_SIZE = 10.0      # Max per single trade
+MAX_POSITION_SIZE = 5.0       # Max per single trade ($5)
 KELLY_FRACTION = 0.25         # Quarter-Kelly for safety
 MIN_EDGE = 0.05               # Minimum 5% edge to fire
 MAX_EXPOSURE = 0.30           # Max 30% of capital exposed at once
