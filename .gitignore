@@ -2,6 +2,6 @@ __pycache__/
 *.pyc
 .env
 *.egg-info/
-data/
+data/backtest_results.json
 logs/
 .venv/

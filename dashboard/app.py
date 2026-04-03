@@ -16,8 +16,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from flask import Flask, render_template, jsonify
 from engine.weather import fetch_all_forecasts, calc_weather_triggers, calc_model_consensus
-from engine.polymarket_real import get_live_weather_markets, calc_forecast_edge
+from engine.polymarket_real import get_live_weather_markets, calc_forecast_edge, parse_market
 from engine.markets import MarketSimulator
+from engine.data_logger import log_odds, log_forecasts, log_trade, get_logged_stats
 from engine.strategy import ForecastArbStrategy
 from engine.executor import Executor
 from config import INITIAL_CAPITAL, WEATHER_MODELS, CITIES
@@ -135,9 +136,14 @@ def engine_loop():
         engine_state["cycle"] += 1
 
         try:
+            cycle = engine_state["cycle"]
+
             # 1. Fetch weather forecasts from real models
             add_log("ingesting ECMWF 0hz run...")
             forecasts = fetch_all_forecasts()
+
+            # LOG forecasts
+            log_forecasts(cycle, forecasts)
 
             # Update model status
             for model_key, model_info in WEATHER_MODELS.items():
@@ -160,6 +166,13 @@ def engine_loop():
                 "market_count": sum(len(v) for v in real_events.values()),
             }
             add_log(f"found {len(real_events)} events, {sum(len(v) for v in real_events.values())} markets")
+
+            # LOG all Polymarket odds
+            all_parsed = []
+            for event_markets in real_events.values():
+                all_parsed.extend(event_markets)
+            log_odds(cycle, all_parsed)
+            add_log(f"logged {len(all_parsed)} market prices to CSV")
 
             # 3. Compare forecasts vs market odds — find edges
             opportunities = []
@@ -225,6 +238,13 @@ def engine_loop():
                     if trade:
                         add_feed("FIRED", short_name, 0, f"{opp['side']} edge:{opp['edge']:.0%}")
                         add_log(f"trade fired: {short_name} {opp['side']} @ {opp['market_prob']:.2f}")
+                        # LOG trade open
+                        log_trade(cycle, {
+                            "contract": short_name, "side": opp["side"],
+                            "entry_price": opp["market_prob"], "size": sig.size,
+                            "edge": opp["abs_edge"], "confidence": sig.confidence,
+                            "status": "open",
+                        })
 
             # 5. Check exits — simulate convergence on existing positions
             for cname in list(executor.positions.keys()):
@@ -244,6 +264,14 @@ def engine_loop():
                         pnl_str = f"+${trade.pnl:.2f}" if trade.pnl >= 0 else f"-${abs(trade.pnl):.2f}"
                         add_feed("CLOSED", cname, trade.pnl, pos.side)
                         add_log(f"closed {cname}: {pnl_str}")
+                        # LOG trade close
+                        log_trade(cycle, {
+                            "contract": cname, "side": pos.side,
+                            "entry_price": pos.entry_price, "size": pos.size,
+                            "edge": "", "confidence": pos.confidence,
+                            "status": "closed", "exit_price": exit_price,
+                            "pnl": trade.pnl,
+                        })
 
             # Wx correlation from model agreement
             all_stds = []
@@ -304,6 +332,7 @@ def api_state():
         "wx_correlation": engine_state["wx_correlation"],
         "real_markets": engine_state["real_markets"],
         "opportunities": engine_state["opportunities"][:10],
+        "data_log": get_logged_stats(),
     })
 
 

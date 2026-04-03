@@ -1,0 +1,36 @@
+timestamp,cycle,market_id,city,target_date,temp_value,unit,threshold_type,yes_price,no_price,volume,slug
+2026-04-03T04:02:34.941316,1,1827388,Beijing,2026-04-06,11.0,C,exact,0.0065,0.9935,997.86,highest-temperature-in-beijing-on-april-6-2026-11c
+2026-04-03T04:02:34.941316,1,1781034,Denver,2026-04-03,62.5,F,range,0.0045,0.9955,963.1229630000001,highest-temperature-in-denver-on-april-3-2026-62-63f
+2026-04-03T04:02:34.941316,1,1781037,Denver,2026-04-03,68.0,F,above,0.0085,0.9915,9974.089046000001,highest-temperature-in-denver-on-april-3-2026-68forhigher
+2026-04-03T04:02:34.941316,1,1815025,Atlanta,2026-04-05,86.5,F,range,0.0035,0.9965,993.2094999999999,highest-temperature-in-atlanta-on-april-5-2026-86-87f
+2026-04-03T04:02:34.941316,1,1827273,Munich,2026-04-06,17.0,C,exact,0.125,0.875,94.91000000000001,highest-temperature-in-munich-on-april-6-2026-17c
+2026-04-03T04:02:34.941316,1,1827275,Munich,2026-04-06,19.0,C,exact,0.022,0.978,99.28774,highest-temperature-in-munich-on-april-6-2026-19c
+2026-04-03T04:02:34.941316,1,1773945,Buenos Aires,2026-04-02,31.0,C,exact,0.0005,0.9995,9922.981489999996,highest-temperature-in-buenos-aires-on-april-2-2026-31c
+2026-04-03T04:02:34.941316,1,1827468,Houston,2026-04-06,80.5,F,range,0.023,0.977,98.85009,highest-temperature-in-houston-on-april-6-2026-80-81f
+2026-04-03T04:02:34.941316,1,1781068,San Francisco,2026-04-03,68.5,F,range,0.07,0.93,984.6278629999997,highest-temperature-in-san-francisco-on-april-3-2026-68-69f
+2026-04-03T04:02:34.941316,1,1780942,Warsaw,2026-04-03,10.0,C,exact,0.003,0.997,983.7070250000004,highest-temperature-in-warsaw-on-april-3-2026-10c
+2026-04-03T04:02:34.941316,1,1827255,Lucknow,2026-04-06,33.0,C,below,0.445,0.555,98.14006899999998,highest-temperature-in-lucknow-on-april-6-2026-33corbelow
+2026-04-03T04:02:34.941316,1,1827256,Lucknow,2026-04-06,34.0,C,exact,0.32,0.68,98.17999999999999,highest-temperature-in-lucknow-on-april-6-2026-34c
+2026-04-03T04:02:34.941316,1,1781295,Tel Aviv,2026-04-04,24.0,C,exact,0.415,0.585,933.1145309999998,highest-temperature-in-tel-aviv-on-april-4-2026-24c
+2026-04-03T04:02:34.941316,1,1781296,Tel Aviv,2026-04-04,25.0,C,exact,0.0945,0.9055,978.4744340000001,highest-temperature-in-tel-aviv-on-april-4-2026-25c
+2026-04-03T04:02:34.941316,1,1781536,Mexico City,2026-04-04,27.0,C,exact,0.295,0.705,97.809606,highest-temperature-in-mexico-city-on-april-4-2026-27c
+2026-04-03T04:02:34.941316,1,1780977,Beijing,2026-04-03,21.0,C,exact,0.0245,0.9755,9770.688088,highest-temperature-in-beijing-on-april-3-2026-21c
+2026-04-03T04:02:34.941316,1,1780590,Houston,2026-04-02,82.5,F,range,0.9995,0.0005,9758.331182000004,highest-temperature-in-houston-on-april-2-2026-82-83f
+2026-04-03T04:02:34.941316,1,1780714,Buenos Aires,2026-04-03,29.0,C,above,0.36,0.64,9740.380615999999,highest-temperature-in-buenos-aires-on-april-3-2026-29corhigher
+2026-04-03T04:02:34.941316,1,1781508,Moscow,2026-04-04,4.0,C,below,0.0035,0.9965,971.9736630000002,highest-temperature-in-moscow-on-april-4-2026-4corbelow
+2026-04-03T04:02:34.941316,1,1781102,Mexico City,2026-04-03,30.0,C,exact,0.0055,0.9945,970.7431999999999,highest-temperature-in-mexico-city-on-april-3-2026-30c
+2026-04-03T04:02:34.941316,1,1780966,Chongqing,2026-04-03,23.0,C,exact,0.29,0.71,967.7097810000001,highest-temperature-in-chongqing-on-april-3-2026-23c
+2026-04-03T04:02:34.941316,1,1838016,Helsinki,2026-04-03,1.0,C,below,0.015,0.985,96.5702,highest-temperature-in-helsinki-on-april-3-2026-1corbelow
+2026-04-03T04:02:34.941316,1,1827232,Chicago,2026-04-06,60.0,F,above,0.0205,0.9795,962.660319,highest-temperature-in-chicago-on-april-6-2026-60forhigher
+2026-04-03T04:02:34.941316,1,1780816,Chicago,2026-04-03,58.0,F,above,0.9175,0.0825,9619.970089999997,highest-temperature-in-chicago-on-april-3-2026-58forhigher
+2026-04-03T04:02:34.941316,1,1780702,Sao Paulo,2026-04-03,33.0,C,exact,0.0035,0.9965,960.9519899999999,highest-temperature-in-sao-paulo-on-april-3-2026-33c
+2026-04-03T04:02:34.941316,1,1781222,Miami,2026-04-04,72.5,F,range,0.0045,0.9955,955.4425000000003,highest-temperature-in-miami-on-april-4-2026-72-73f
+2026-04-03T04:02:34.941316,1,1827235,Ankara,2026-04-06,11.0,C,exact,0.059,0.941,95.5005,highest-temperature-in-ankara-on-april-6-2026-11c
+2026-04-03T04:02:34.941316,1,1780902,Shanghai,2026-04-03,17.0,C,exact,0.125,0.875,9513.805351999987,highest-temperature-in-shanghai-on-april-3-2026-17c
+2026-04-03T04:02:34.941316,1,1780904,Shanghai,2026-04-03,19.0,C,exact,0.007,0.993,9528.297942999994,highest-temperature-in-shanghai-on-april-3-2026-19c
+2026-04-03T04:02:34.941316,1,1781133,Sao Paulo,2026-04-04,25.0,C,below,0.0175,0.9825,950.8216929999999,highest-temperature-in-sao-paulo-on-april-4-2026-25corbelow
+2026-04-03T04:02:34.941316,1,1781136,Sao Paulo,2026-04-04,28.0,C,exact,0.265,0.735,937.1757370000005,highest-temperature-in-sao-paulo-on-april-4-2026-28c
+2026-04-03T04:02:34.941316,1,1781141,Sao Paulo,2026-04-04,33.0,C,exact,0.007,0.993,935.04134,highest-temperature-in-sao-paulo-on-april-4-2026-33c
+2026-04-03T04:02:34.941316,1,1814985,Seattle,2026-04-05,58.5,F,range,0.036,0.964,94.64875,highest-temperature-in-seattle-on-april-5-2026-58-59f
+2026-04-03T04:02:34.941316,1,1815171,Warsaw,2026-04-05,13.0,C,exact,0.009,0.991,933.8780539999998,highest-temperature-in-warsaw-on-april-5-2026-13c
+2026-04-03T04:02:34.941316,1,1780229,New York City,2026-04-02,66.5,F,range,0.0005,0.9995,9335.462409000002,highest-temperature-in-nyc-on-april-2-2026-66-67f
