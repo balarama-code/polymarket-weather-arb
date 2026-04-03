@@ -12,7 +12,7 @@ Setup:
 import os
 from dotenv import load_dotenv
 from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import OrderArgs, OrderType
+from py_clob_client.clob_types import ApiCreds, BalanceAllowanceParams, OrderArgs, OrderType, AssetType
 from py_clob_client.order_builder.constants import BUY, SELL
 
 load_dotenv()
@@ -46,16 +46,10 @@ class LiveTrader:
                 key=self.private_key,
             )
 
-            # Set API credentials if available
-            if self.api_key and self.api_secret and self.api_passphrase:
-                self.client.set_api_creds({
-                    "apiKey": self.api_key,
-                    "secret": self.api_secret,
-                    "passphrase": self.api_passphrase,
-                })
-            else:
-                # Derive API key from private key
-                self.client.create_or_derive_api_creds()
+            # Derive API credentials and set them on the client
+            creds = self.client.create_or_derive_api_creds()
+            self.client.set_api_creds(creds)
+            print(f"  [LIVE] API creds derived & set OK")
 
             self.connected = True
             addr = self.client.get_address()
@@ -71,7 +65,8 @@ class LiveTrader:
         if not self.connected:
             return 0.0
         try:
-            bal = self.client.get_balance_allowance()
+            params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+            bal = self.client.get_balance_allowance(params)
             return float(bal.get("balance", 0)) / 1e6  # USDC has 6 decimals
         except Exception as e:
             print(f"  [LIVE] Balance error: {e}")
