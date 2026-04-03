@@ -44,12 +44,13 @@ class LiveTrader:
                 host=POLYMARKET_HOST,
                 chain_id=CHAIN_ID,
                 key=self.private_key,
+                signature_type=2,  # POLY_GNOSIS_SAFE (Polymarket proxy wallet)
             )
 
             # Derive API credentials and set them on the client
             creds = self.client.create_or_derive_api_creds()
             self.client.set_api_creds(creds)
-            print(f"  [LIVE] API creds derived & set OK")
+            print(f"  [LIVE] API creds derived & set OK (gnosis-safe)")
 
             self.connected = True
             addr = self.client.get_address()
