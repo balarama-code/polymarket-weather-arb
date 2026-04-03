@@ -273,6 +273,7 @@
     <div class="dot-online"></div>
     <span class="label">SYSTEM ONLINE</span>
     <span class="title">FORECAST ARB ENGINE v7.3</span>
+    <span id="engine-mode" style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:2px;margin-left:8px;"></span>
   </div>
   <div class="meta">
     <span id="uptime">00:00:00</span>&nbsp;&nbsp;
@@ -525,6 +526,18 @@ function poll() {
       document.getElementById('uptime').textContent = data.uptime || '00:00:00';
       document.getElementById('cycle-num').textContent = data.cycle;
 
+      // Show mode badge
+      const modeEl = document.getElementById('engine-mode');
+      if (data.mode === 'LIVE') {
+        modeEl.textContent = 'LIVE';
+        modeEl.style.background = '#ff4466';
+        modeEl.style.color = '#fff';
+      } else {
+        modeEl.textContent = 'DRY RUN';
+        modeEl.style.background = '#ffaa00';
+        modeEl.style.color = '#000';
+      }
+
       const p = data.portfolio || {};
 
       // Portfolio — all from real executor data
@@ -602,13 +615,25 @@ function poll() {
       // Recent trades
       const rtEl = document.getElementById('recent-trades');
       rtEl.innerHTML = ((p.recent_trades || []).slice(-5)).map(t => {
-        const pnlC = t.pnl > 0 ? 'green' : (t.pnl < 0 ? 'red' : '');
-        const pnlS = t.pnl > 0 ? '+' + t.pnl.toFixed(1) : t.pnl.toFixed(1);
-        return `<div class="trade-row">
-          <span class="trade-time">${t.close_time || t.open_time}</span>
-          <span class="trade-pnl" style="color:${t.pnl>=0?'#00ff88':'#ff4466'}">${pnlS}</span>
-          <span style="color:#8892a0">${t.contract}</span>
-        </div>`;
+        if (data.mode === 'LIVE') {
+          // Live trade format: time, contract, side, size, edge
+          const sideColor = t.side === 'YES' ? '#00ff88' : '#ff4466';
+          return `<div class="trade-row">
+            <span class="trade-time">${t.time || ''}</span>
+            <span style="color:${sideColor};font-weight:500;min-width:30px">${t.side || ''}</span>
+            <span style="color:#00ccff;min-width:50px">$${(t.size || 0).toFixed(2)}</span>
+            <span style="color:#8892a0">${t.contract || ''}</span>
+          </div>`;
+        } else {
+          // Dry run format: pnl-based
+          const pnlVal = t.pnl || 0;
+          const pnlS = pnlVal > 0 ? '+' + pnlVal.toFixed(1) : pnlVal.toFixed(1);
+          return `<div class="trade-row">
+            <span class="trade-time">${t.close_time || t.open_time || ''}</span>
+            <span class="trade-pnl" style="color:${pnlVal>=0?'#00ff88':'#ff4466'}">${pnlS}</span>
+            <span style="color:#8892a0">${t.contract || ''}</span>
+          </div>`;
+        }
       }).join('');
 
       // Active positions — real data with entry price and size

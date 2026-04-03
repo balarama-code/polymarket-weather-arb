@@ -1,7 +1,8 @@
 """
 Forecast Arb Engine — Web Terminal Dashboard.
 Flask app with real-time updates via polling.
-Now uses REAL Polymarket weather market data.
+LIVE mode: real Polymarket wallet balance, real trades.
+DRY_RUN mode: simulated executor.
 """
 
 import os
@@ -22,7 +23,7 @@ from engine.data_logger import log_odds, log_forecasts, log_trade, get_logged_st
 from engine.live_trader import LiveTrader, check_env
 from engine.strategy import ForecastArbStrategy
 from engine.executor import Executor
-from config import INITIAL_CAPITAL, WEATHER_MODELS, CITIES
+from config import INITIAL_CAPITAL, WEATHER_MODELS, CITIES, MAX_POSITION_SIZE
 
 app = Flask(__name__)
 
@@ -37,17 +38,24 @@ engine_state = {
     "weather_triggers": {},
     "model_status": {},
     "execution_log": [],
-    "portfolio": {},
     "wx_correlation": 0,
     "real_markets": {},
     "opportunities": [],
+    # LIVE mode wallet data
+    "live_balance": 0.0,
+    "live_initial_balance": 0.0,
+    "live_pnl": 0.0,
+    "live_open_orders": [],
+    "live_trade_count": 0,
+    "live_wins": 0,
+    "live_trade_history": [],
+    "live_equity_curve": [],
 }
 
-executor = Executor(INITIAL_CAPITAL)
-strategy = ForecastArbStrategy(INITIAL_CAPITAL)
-live_trader = None  # Set when ENGINE_MODE=LIVE
+executor = Executor(INITIAL_CAPITAL)  # Only used in DRY_RUN
+live_trader = None
 
-# City name mapping (Polymarket name → Open-Meteo coords)
+# City name mapping
 CITY_COORDS = {
     "new york city": {"lat": 40.71, "lon": -74.01, "key": "New York"},
     "nyc": {"lat": 40.71, "lon": -74.01, "key": "New York"},
@@ -96,7 +104,6 @@ def add_feed(action: str, contract: str, pnl: float = 0, status: str = ""):
 
 
 def get_forecast_for_city(city_name: str, forecasts: dict) -> float:
-    """Get forecast max temperature for a city from our weather data."""
     city_lower = city_name.lower()
     city_info = CITY_COORDS.get(city_lower)
     if not city_info:
@@ -105,7 +112,6 @@ def get_forecast_for_city(city_name: str, forecasts: dict) -> float:
     key = city_info["key"]
     city_data = forecasts.get(key, {})
     if not city_data:
-        # Try fetching directly
         from engine.weather import fetch_forecast
         coords = {"lat": city_info["lat"], "lon": city_info["lon"]}
         for model in ["GFS", "ECMWF"]:
@@ -114,7 +120,6 @@ def get_forecast_for_city(city_name: str, forecasts: dict) -> float:
                 return data["temperature_2m_max"]
         return None
 
-    # Average max temp across models
     temps = []
     for model_key, data in city_data.items():
         t = data.get("temperature_2m_max")
@@ -135,10 +140,15 @@ def engine_loop():
     is_live = os.environ.get("ENGINE_MODE") == "LIVE"
     if is_live:
         engine_state["mode"] = "LIVE"
-        add_log("*** LIVE MODE — REAL MONEY ***")
+        add_log("*** LIVE MODE — REAL WALLET ***")
         live_trader = LiveTrader()
         if live_trader.connect():
             balance = live_trader.get_balance()
+            engine_state["live_balance"] = balance
+            engine_state["live_initial_balance"] = balance
+            engine_state["live_equity_curve"] = [
+                (datetime.utcnow().isoformat(), round(balance, 2))
+            ]
             add_log(f"wallet connected, balance: ${balance:.2f} USDC")
             add_log(f"max position: ${live_trader.max_position}")
         else:
@@ -159,11 +169,9 @@ def engine_loop():
         try:
             cycle = engine_state["cycle"]
 
-            # 1. Fetch weather forecasts from real models
+            # 1. Fetch weather forecasts
             add_log("ingesting ECMWF 0hz run...")
             forecasts = fetch_all_forecasts()
-
-            # LOG forecasts
             log_forecasts(cycle, forecasts)
 
             # Update model status
@@ -175,7 +183,6 @@ def engine_loop():
                     "status": "online",
                 }
 
-            # Weather triggers
             triggers = calc_weather_triggers(forecasts)
             engine_state["weather_triggers"] = triggers
 
@@ -193,21 +200,18 @@ def engine_loop():
             for event_markets in real_events.values():
                 all_parsed.extend(event_markets)
             log_odds(cycle, all_parsed)
-            add_log(f"logged {len(all_parsed)} market prices to CSV")
 
-            # 3. Compare forecasts vs market odds — find edges
+            # 3. Compare forecasts vs market odds
             opportunities = []
 
             for event_key, markets in real_events.items():
                 city, date = event_key.split("|")
 
-                # Get our forecast for this city
                 forecast_temp = get_forecast_for_city(city, forecasts)
                 if forecast_temp is None:
                     add_feed("scan", f"{city[:12]}", 0, "no forecast")
                     continue
 
-                # Calculate forecast std from model spread
                 city_lower = city.lower()
                 city_info = CITY_COORDS.get(city_lower)
                 if city_info:
@@ -226,7 +230,7 @@ def engine_loop():
 
                     short_name = f"{city[:8]}.{market['temp_mid_original']:.0f}{market['unit']}"
 
-                    if edge_info["abs_edge"] > 0.05:  # >5% edge
+                    if edge_info["abs_edge"] > 0.05:
                         opportunities.append(edge_info)
                         add_feed("FIRED", short_name, 0,
                                 f"{edge_info['side']} {edge_info['edge']:.0%}")
@@ -237,90 +241,153 @@ def engine_loop():
 
             engine_state["opportunities"] = opportunities[:20]
 
-            # 4. Execute trades (dry run) on best opportunities
-            opportunities.sort(key=lambda x: x["abs_edge"], reverse=True)
-            for opp in opportunities[:2]:
-                short_name = f"{opp['city'][:10]}.{opp['date'][-2:]}"
+            # 4. LIVE MODE: real wallet data + real trade execution
+            if is_live and live_trader and live_trader.connected:
+                # Refresh real balance every cycle
+                balance = live_trader.get_balance()
+                engine_state["live_balance"] = balance
+                engine_state["live_pnl"] = round(balance - engine_state["live_initial_balance"], 2)
 
-                if short_name not in executor.positions and len(executor.positions) < 8:
-                    # Create a signal-like object
-                    class FakeSignal:
-                        pass
-                    sig = FakeSignal()
-                    sig.contract_name = short_name
-                    sig.side = opp["side"]
-                    sig.edge = opp["abs_edge"]
-                    sig.market_prob = opp["market_prob"]
-                    sig.confidence = min(0.95, 0.5 + opp["abs_edge"])
-                    sig.size = min(10.0, executor.capital * 0.1 * opp["abs_edge"] * 10)
-                    sig.size = max(1.0, round(sig.size, 2))
+                # Track equity curve from real balance
+                engine_state["live_equity_curve"].append(
+                    (datetime.utcnow().isoformat(), round(balance, 2))
+                )
+                engine_state["live_equity_curve"] = engine_state["live_equity_curve"][-200:]
 
-                    trade = executor.open_trade(sig)
-                    if trade:
-                        add_feed("FIRED", short_name, 0, f"{opp['side']} edge:{opp['edge']:.0%}")
-                        add_log(f"trade fired: {short_name} {opp['side']} @ {opp['market_prob']:.2f}")
+                # Get real open orders
+                orders = live_trader.get_open_orders()
+                engine_state["live_open_orders"] = orders
 
-                        # LIVE: execute real order on Polymarket
-                        if is_live and live_trader and live_trader.connected:
-                            cond_id = opp.get("condition_id", "")
-                            if cond_id:
-                                market_info = live_trader.get_market_info(cond_id)
-                                tokens = market_info.get("tokens", [])
-                                if tokens:
-                                    token_id = tokens[0].get("token_id", "")
-                                    if opp["side"] == "YES":
-                                        result = live_trader.buy_yes(token_id, sig.size, opp["market_prob"])
-                                    else:
-                                        result = live_trader.buy_no(token_id, sig.size, opp["market_prob"])
+                add_log(f"wallet: ${balance:.2f} USDC | orders: {len(orders)}")
 
-                                    if "error" in result:
-                                        add_log(f"LIVE ORDER FAILED: {result['error'][:50]}")
-                                    else:
-                                        add_log(f"LIVE ORDER OK: {short_name} {opp['side']}")
+                # Execute on best opportunities (only if we have balance)
+                opportunities.sort(key=lambda x: x["abs_edge"], reverse=True)
+                for opp in opportunities[:1]:  # Max 1 trade per cycle in live
+                    if balance < 1.0:
+                        add_log("insufficient balance for live trade")
+                        break
 
-                        # LOG trade open
-                        log_trade(cycle, {
-                            "contract": short_name, "side": opp["side"],
-                            "entry_price": opp["market_prob"], "size": sig.size,
-                            "edge": opp["abs_edge"], "confidence": sig.confidence,
-                            "status": "open" if not is_live else "live_open",
-                        })
+                    cond_id = opp.get("condition_id", "")
+                    if not cond_id:
+                        continue
 
-            # 5. Check exits — simulate convergence on existing positions
-            for cname in list(executor.positions.keys()):
-                pos = executor.positions[cname]
-                # Simulate price movement toward fair value (convergence)
-                held_cycles = engine_state["cycle"] - getattr(pos, '_open_cycle', engine_state["cycle"])
-                if not hasattr(pos, '_open_cycle'):
-                    pos._open_cycle = engine_state["cycle"]
+                    trade_size = min(
+                        live_trader.max_position,
+                        balance * 0.4,  # Max 40% of balance per trade
+                        max(0.5, balance * opp["abs_edge"] * 5),
+                    )
+                    trade_size = round(trade_size, 2)
 
-                # Random convergence after some cycles
-                if held_cycles > 3 and random.random() < 0.3:
-                    # Simulate win/loss based on edge
-                    won = random.random() < (0.5 + pos.confidence * 0.3)
-                    exit_price = pos.entry_price * (1.3 if won else 0.6)
-                    trade = executor.close_trade(cname, exit_price)
-                    if trade:
-                        pnl_str = f"+${trade.pnl:.2f}" if trade.pnl >= 0 else f"-${abs(trade.pnl):.2f}"
-                        add_feed("CLOSED", cname, trade.pnl, pos.side)
-                        add_log(f"closed {cname}: {pnl_str}")
-                        # LOG trade close
-                        log_trade(cycle, {
-                            "contract": cname, "side": pos.side,
-                            "entry_price": pos.entry_price, "size": pos.size,
-                            "edge": "", "confidence": pos.confidence,
-                            "status": "closed", "exit_price": exit_price,
-                            "pnl": trade.pnl,
-                        })
+                    if trade_size < 0.50:
+                        continue
 
-            # Wx correlation from model agreement
+                    short_name = f"{opp['city'][:10]}.{opp['date'][-2:]}"
+
+                    try:
+                        market_info = live_trader.get_market_info(cond_id)
+                        tokens = market_info.get("tokens", [])
+                        if not tokens:
+                            continue
+
+                        token_id = tokens[0].get("token_id", "")
+                        if not token_id:
+                            continue
+
+                        if opp["side"] == "YES":
+                            result = live_trader.buy_yes(token_id, trade_size, opp["market_prob"])
+                        else:
+                            result = live_trader.buy_no(token_id, trade_size, opp["market_prob"])
+
+                        if "error" in result:
+                            add_log(f"LIVE ORDER FAILED: {result['error'][:60]}")
+                            add_feed("FAILED", short_name, 0, result["error"][:30])
+                        else:
+                            add_log(f"LIVE ORDER OK: {short_name} {opp['side']} ${trade_size}")
+                            add_feed("LIVE", short_name, 0,
+                                    f"{opp['side']} ${trade_size:.2f}")
+
+                            engine_state["live_trade_count"] += 1
+                            engine_state["live_trade_history"].append({
+                                "time": datetime.utcnow().strftime("%H:%M:%S"),
+                                "contract": short_name,
+                                "side": opp["side"],
+                                "size": trade_size,
+                                "price": opp["market_prob"],
+                                "edge": opp["abs_edge"],
+                                "status": "filled",
+                            })
+                            engine_state["live_trade_history"] = engine_state["live_trade_history"][-20:]
+
+                            log_trade(cycle, {
+                                "contract": short_name, "side": opp["side"],
+                                "entry_price": opp["market_prob"], "size": trade_size,
+                                "edge": opp["abs_edge"], "confidence": min(0.95, 0.5 + opp["abs_edge"]),
+                                "status": "live_filled",
+                            })
+
+                    except Exception as e:
+                        add_log(f"LIVE TRADE ERROR: {str(e)[:60]}")
+
+            # DRY_RUN MODE: simulated executor
+            elif not is_live:
+                opportunities.sort(key=lambda x: x["abs_edge"], reverse=True)
+                for opp in opportunities[:2]:
+                    short_name = f"{opp['city'][:10]}.{opp['date'][-2:]}"
+
+                    if short_name not in executor.positions and len(executor.positions) < 8:
+                        class FakeSignal:
+                            pass
+                        sig = FakeSignal()
+                        sig.contract_name = short_name
+                        sig.side = opp["side"]
+                        sig.edge = opp["abs_edge"]
+                        sig.market_prob = opp["market_prob"]
+                        sig.confidence = min(0.95, 0.5 + opp["abs_edge"])
+                        sig.size = min(10.0, executor.capital * 0.1 * opp["abs_edge"] * 10)
+                        sig.size = max(1.0, round(sig.size, 2))
+
+                        trade = executor.open_trade(sig)
+                        if trade:
+                            add_feed("FIRED", short_name, 0, f"{opp['side']} edge:{opp['edge']:.0%}")
+                            add_log(f"trade fired: {short_name} {opp['side']} @ {opp['market_prob']:.2f}")
+                            log_trade(cycle, {
+                                "contract": short_name, "side": opp["side"],
+                                "entry_price": opp["market_prob"], "size": sig.size,
+                                "edge": opp["abs_edge"], "confidence": sig.confidence,
+                                "status": "open",
+                            })
+
+                # Simulate exits (DRY_RUN only)
+                for cname in list(executor.positions.keys()):
+                    pos = executor.positions[cname]
+                    held_cycles = engine_state["cycle"] - getattr(pos, '_open_cycle', engine_state["cycle"])
+                    if not hasattr(pos, '_open_cycle'):
+                        pos._open_cycle = engine_state["cycle"]
+
+                    if held_cycles > 3 and random.random() < 0.3:
+                        won = random.random() < (0.5 + pos.confidence * 0.3)
+                        exit_price = pos.entry_price * (1.3 if won else 0.6)
+                        trade = executor.close_trade(cname, exit_price)
+                        if trade:
+                            pnl_str = f"+${trade.pnl:.2f}" if trade.pnl >= 0 else f"-${abs(trade.pnl):.2f}"
+                            add_feed("CLOSED", cname, trade.pnl, pos.side)
+                            add_log(f"closed {cname}: {pnl_str}")
+                            log_trade(cycle, {
+                                "contract": cname, "side": pos.side,
+                                "entry_price": pos.entry_price, "size": pos.size,
+                                "edge": "", "confidence": pos.confidence,
+                                "status": "closed", "exit_price": exit_price,
+                                "pnl": trade.pnl,
+                            })
+
+            # Wx correlation
             all_stds = []
             for city_key, city_data in forecasts.items():
                 temps = [d.get("temperature_2m_max", 20) for d in city_data.values()]
                 if len(temps) > 1:
                     import numpy as np
                     all_stds.append(1.0 / (1.0 + np.std(temps)))
-            engine_state["wx_correlation"] = round(float(np.mean(all_stds)), 2) if all_stds else 0.5
+            engine_state["wx_correlation"] = round(float(__import__("numpy").mean(all_stds)), 2) if all_stds else 0.5
 
             # Random market events
             if random.random() < 0.15:
@@ -335,13 +402,10 @@ def engine_loop():
                 ]
                 add_log(random.choice(events))
 
-            # Update portfolio state
-            engine_state["portfolio"] = executor.get_state()
-
         except Exception as e:
             add_log(f"error: {str(e)[:60]}")
 
-        time.sleep(5)  # Cycle interval (longer because API calls)
+        time.sleep(5)
 
 
 @app.route("/")
@@ -359,6 +423,65 @@ def api_state():
         mins, secs = divmod(rem, 60)
         uptime = f"{hours:02d}:{mins:02d}:{secs:02d}"
 
+    is_live = engine_state["mode"] == "LIVE"
+
+    # Build portfolio based on mode
+    if is_live:
+        balance = engine_state["live_balance"]
+        initial = engine_state["live_initial_balance"]
+        pnl = engine_state["live_pnl"]
+        trade_count = engine_state["live_trade_count"]
+        wins = engine_state["live_wins"]
+        win_rate = (wins / trade_count * 100) if trade_count > 0 else 0
+
+        # Open orders as positions
+        positions = {}
+        for order in engine_state["live_open_orders"]:
+            name = order.get("market", order.get("id", "?"))[:15]
+            positions[name] = {
+                "id": order.get("id", ""),
+                "contract": name,
+                "side": order.get("side", "BUY"),
+                "size": float(order.get("size", 0)),
+                "entry_price": float(order.get("price", 0)),
+                "exit_price": None,
+                "pnl": 0,
+                "target_price": 0,
+                "status": order.get("status", "open"),
+                "open_time": order.get("created_at", ""),
+                "close_time": None,
+            }
+
+        exposure_usd = sum(p["size"] for p in positions.values())
+        exposure_pct = (exposure_usd / balance * 100) if balance > 0 else 0
+
+        portfolio = {
+            "equity": round(balance, 2),
+            "capital": round(balance, 2),
+            "total_pnl": round(pnl, 2),
+            "today_pnl": round(pnl, 2),
+            "today_trades": trade_count,
+            "win_rate": round(win_rate, 1),
+            "sharpe": 0,
+            "exposure": round(exposure_pct, 1),
+            "exposure_usd": round(exposure_usd, 2),
+            "drawdown": 0,
+            "daily_var": 0,
+            "daily_var_usd": 0,
+            "total_trades": trade_count,
+            "winning_trades": wins,
+            "kelly_f": round(balance * 0.25, 2) if balance > 0 else 0,
+            "max_pos": MAX_POSITION_SIZE,
+            "max_exposure": 30,
+            "wx_confidence": 0,
+            "initial_capital": round(initial, 2),
+            "positions": positions,
+            "recent_trades": engine_state["live_trade_history"][-10:],
+            "equity_curve": engine_state["live_equity_curve"][-200:],
+        }
+    else:
+        portfolio = executor.get_state()
+
     return jsonify({
         "cycle": engine_state["cycle"],
         "mode": engine_state["mode"],
@@ -368,7 +491,7 @@ def api_state():
         "weather_triggers": engine_state["weather_triggers"],
         "model_status": engine_state["model_status"],
         "execution_log": engine_state["execution_log"],
-        "portfolio": engine_state["portfolio"],
+        "portfolio": portfolio,
         "wx_correlation": engine_state["wx_correlation"],
         "real_markets": engine_state["real_markets"],
         "opportunities": engine_state["opportunities"][:10],
@@ -377,13 +500,13 @@ def api_state():
 
 
 def start_dashboard(host="127.0.0.1", port=5050):
-    """Start the dashboard and engine."""
     engine_thread = threading.Thread(target=engine_loop, daemon=True)
     engine_thread.start()
 
+    mode = os.environ.get("ENGINE_MODE", "DRY_RUN")
     print(f"\n  FORECAST ARB ENGINE v7.3 — REAL POLYMARKET DATA")
     print(f"  Dashboard: http://{host}:{port}")
-    print(f"  Mode: DRY RUN | Capital: ${INITIAL_CAPITAL}")
+    print(f"  Mode: {mode} | Max Position: ${MAX_POSITION_SIZE}")
     print(f"  Press Ctrl+C to stop\n")
 
     app.run(host=host, port=port, debug=False, use_reloader=False)
