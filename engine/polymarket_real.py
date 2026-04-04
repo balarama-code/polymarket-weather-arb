@@ -150,6 +150,13 @@ def parse_market(market: dict) -> Optional[dict]:
     elif "-" in temp_str:
         threshold_type = "range"
 
+    # Extract CLOB token IDs (YES = index 0, NO = index 1)
+    clob_token_ids = market.get("clobTokenIds", "[]")
+    if isinstance(clob_token_ids, str):
+        clob_token_ids = eval(clob_token_ids)
+    yes_token_id = clob_token_ids[0] if len(clob_token_ids) > 0 else ""
+    no_token_id = clob_token_ids[1] if len(clob_token_ids) > 1 else ""
+
     return {
         "id": market.get("id"),
         "question": question,
@@ -167,6 +174,8 @@ def parse_market(market: dict) -> Optional[dict]:
         "volume": float(market.get("volume", 0)),
         "liquidity": float(market.get("liquidity", 0)),
         "condition_id": market.get("conditionId", ""),
+        "yes_token_id": yes_token_id,
+        "no_token_id": no_token_id,
         "active": market.get("active", False),
     }
 
@@ -240,6 +249,8 @@ def calc_forecast_edge(market: dict, forecast_temp_c: float, forecast_std: float
     return {
         "market_id": market["id"],
         "condition_id": market.get("condition_id", ""),
+        "yes_token_id": market.get("yes_token_id", ""),
+        "no_token_id": market.get("no_token_id", ""),
         "question": market["question"],
         "city": market["city"],
         "date": market["target_date"],

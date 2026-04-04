@@ -12,7 +12,7 @@ Setup:
 import os
 from dotenv import load_dotenv
 from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import ApiCreds, BalanceAllowanceParams, OrderArgs, OrderType, AssetType
+from py_clob_client.clob_types import ApiCreds, BalanceAllowanceParams, OrderArgs, AssetType, PartialCreateOrderOptions
 from py_clob_client.order_builder.constants import BUY, SELL
 
 load_dotenv()
@@ -29,6 +29,7 @@ class LiveTrader:
         self.api_key = os.getenv("POLY_API_KEY", "")
         self.api_secret = os.getenv("POLY_API_SECRET", "")
         self.api_passphrase = os.getenv("POLY_API_PASSPHRASE", "")
+        self.funder = os.getenv("POLY_FUNDER", "")  # Polymarket proxy wallet address
         self.max_position = float(os.getenv("MAX_POSITION_SIZE", "5.0"))
         self.client = None
         self.connected = False
@@ -45,6 +46,7 @@ class LiveTrader:
                 chain_id=CHAIN_ID,
                 key=self.private_key,
                 signature_type=2,  # POLY_GNOSIS_SAFE (Polymarket proxy wallet)
+                funder=self.funder if self.funder else None,
             )
 
             # Derive API credentials and set them on the client
@@ -93,7 +95,6 @@ class LiveTrader:
                     size=round(amount / price, 2),
                     side=BUY,
                 ),
-                OrderType.GTC,  # Good-til-cancelled
             )
             return {"status": "ok", "order": order}
         except Exception as e:
@@ -114,7 +115,6 @@ class LiveTrader:
                     size=round(amount / (1.0 - price), 2),
                     side=BUY,
                 ),
-                OrderType.GTC,
             )
             return {"status": "ok", "order": order}
         except Exception as e:

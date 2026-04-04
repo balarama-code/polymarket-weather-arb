@@ -290,13 +290,14 @@ def engine_loop():
                     short_name = f"{opp['city'][:10]}.{opp['date'][-2:]}"
 
                     try:
-                        market_info = live_trader.get_market_info(cond_id)
-                        tokens = market_info.get("tokens", [])
-                        if not tokens:
-                            continue
+                        # Use token IDs directly from Gamma API (no extra CLOB lookup)
+                        if opp["side"] == "YES":
+                            token_id = opp.get("yes_token_id", "")
+                        else:
+                            token_id = opp.get("no_token_id", "")
 
-                        token_id = tokens[0].get("token_id", "")
                         if not token_id:
+                            add_log(f"no token_id for {short_name}")
                             continue
 
                         if opp["side"] == "YES":
@@ -461,6 +462,38 @@ def api_state():
         exposure_usd = sum(p["size"] for p in positions.values())
         exposure_pct = (exposure_usd / balance * 100) if balance > 0 else 0
 
+        # Calculate drawdown from equity curve
+        eq_values = [e[1] for e in engine_state["live_equity_curve"]]
+        max_eq = max(eq_values) if eq_values else balance
+        drawdown = max_eq - balance
+        drawdown_pct = round(drawdown / max_eq * 100, 1) if max_eq > 0 else 0
+
+        # Calculate Sharpe and daily VaR from trade history
+        import numpy as np
+        trade_pnls = [t.get("pnl", 0) for t in engine_state["live_trade_history"] if "pnl" in t]
+        sharpe = 0
+        daily_var = 0
+        daily_var_usd = 0
+        if len(trade_pnls) >= 2 and np.std(trade_pnls) > 0:
+            sharpe = round(float(np.mean(trade_pnls) / np.std(trade_pnls) * (252 ** 0.5)), 2)
+            daily_var_usd = round(abs(float(np.percentile(trade_pnls, 5))), 2)
+            daily_var = round(daily_var_usd / balance * 100, 1) if balance > 0 else 0
+
+        # Kelly from win rate
+        if trade_count > 0 and wins > 0:
+            avg_win = np.mean([t["pnl"] for t in engine_state["live_trade_history"] if t.get("pnl", 0) > 0]) if wins > 0 else 0
+            avg_loss = abs(np.mean([t["pnl"] for t in engine_state["live_trade_history"] if t.get("pnl", 0) <= 0])) if (trade_count - wins) > 0 else 1
+            b = avg_win / avg_loss if avg_loss > 0 else 1
+            win_p = wins / trade_count
+            kelly_raw = (b * win_p - (1 - win_p)) / b if b > 0 else 0
+            kelly_f = round(max(0, kelly_raw * 0.25 * balance), 2)
+        else:
+            kelly_f = round(balance * 0.25, 2)
+
+        # Wx confidence from active opportunities
+        opp_edges = [o["abs_edge"] for o in engine_state.get("opportunities", []) if o.get("abs_edge", 0) > 0.05]
+        wx_confidence = round(min(95, len(opp_edges) * 15 + sum(opp_edges) * 100), 0) if opp_edges else 0
+
         portfolio = {
             "equity": round(balance, 2),
             "capital": round(balance, 2),
@@ -468,18 +501,18 @@ def api_state():
             "today_pnl": round(pnl, 2),
             "today_trades": trade_count,
             "win_rate": round(win_rate, 1),
-            "sharpe": 0,
+            "sharpe": sharpe,
             "exposure": round(exposure_pct, 1),
             "exposure_usd": round(exposure_usd, 2),
-            "drawdown": 0,
-            "daily_var": 0,
-            "daily_var_usd": 0,
+            "drawdown": drawdown_pct,
+            "daily_var": daily_var,
+            "daily_var_usd": daily_var_usd,
             "total_trades": trade_count,
             "winning_trades": wins,
-            "kelly_f": round(balance * 0.25, 2) if balance > 0 else 0,
+            "kelly_f": kelly_f,
             "max_pos": MAX_POSITION_SIZE,
             "max_exposure": 30,
-            "wx_confidence": 0,
+            "wx_confidence": wx_confidence,
             "initial_capital": round(initial, 2),
             "positions": positions,
             "recent_trades": engine_state["live_trade_history"][-10:],
