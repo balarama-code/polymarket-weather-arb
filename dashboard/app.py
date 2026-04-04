@@ -260,11 +260,13 @@ def engine_loop():
                 )
                 engine_state["live_equity_curve"] = engine_state["live_equity_curve"][-200:]
 
-                # Get real open orders
+                # Get open orders + filled trades (positions)
                 orders = live_trader.get_open_orders()
+                filled = live_trader.get_filled_trades()
                 engine_state["live_open_orders"] = orders
+                engine_state["live_filled_trades"] = filled
 
-                add_log(f"wallet: ${balance:.2f} USDC | orders: {len(orders)}")
+                add_log(f"wallet: ${balance:.2f} USDC | orders: {len(orders)} | positions: {len(filled)}")
 
                 # Execute on best opportunities (only if we have balance)
                 opportunities.sort(key=lambda x: x["abs_edge"], reverse=True)
@@ -449,28 +451,69 @@ def api_state():
         wins = engine_state["live_wins"]
         win_rate = (wins / trade_count * 100) if trade_count > 0 else 0
 
-        # Open orders as positions (CLOB order format)
+        # Aggregate filled trades into net positions by market+outcome
         positions = {}
+        filled = engine_state.get("live_filled_trades", [])
+        pos_agg = {}  # {market|outcome: {buy_shares, buy_cost, sell_shares, ...}}
+        for trade in filled:
+            market = trade.get("market", "?")
+            outcome = trade.get("outcome", "?")
+            key = f"{market}|{outcome}"
+            size = float(trade.get("size", 0))
+            price = float(trade.get("price", 0))
+            side = trade.get("side", "BUY")
+
+            if key not in pos_agg:
+                pos_agg[key] = {"buy_shares": 0, "buy_cost": 0,
+                                "sell_shares": 0, "sell_revenue": 0,
+                                "outcome": outcome, "market": market, "fills": 0}
+            if side == "BUY":
+                pos_agg[key]["buy_shares"] += size
+                pos_agg[key]["buy_cost"] += size * price
+            else:
+                pos_agg[key]["sell_shares"] += size
+                pos_agg[key]["sell_revenue"] += size * price
+            pos_agg[key]["fills"] += 1
+
+        for key, agg in pos_agg.items():
+            net_shares = agg["buy_shares"] - agg["sell_shares"]
+            if net_shares < 1:  # Skip closed/near-zero positions
+                continue
+            avg_price = round(agg["buy_cost"] / agg["buy_shares"], 4) if agg["buy_shares"] > 0 else 0
+            cost_basis = round(agg["buy_cost"] - agg["sell_revenue"], 2)
+            short_market = agg["market"][:10]
+            name = f"{short_market}_{agg['outcome']}"
+            positions[name] = {
+                "id": name[:8],
+                "contract": f"{short_market}...",
+                "side": f"BUY {agg['outcome']}",
+                "size": max(0, cost_basis),
+                "entry_price": avg_price,
+                "exit_price": None,
+                "pnl": round(agg["sell_revenue"] - (agg["sell_shares"] * avg_price), 2),
+                "target_price": 0,
+                "status": f"{net_shares:.0f} shares",
+                "open_time": "",
+                "close_time": None,
+            }
+
+        # Also add pending open orders
         for order in engine_state["live_open_orders"]:
             oid = order.get("id", "?")[:8]
-            market = order.get("market", oid)
+            market = order.get("market", oid)[:10]
             outcome = order.get("outcome", "")
-            side_str = f"{order.get('side', 'BUY')} {outcome}".strip()
-            orig_size = float(order.get("original_size", 0))
-            price = float(order.get("price", 0))
-            dollar_val = round(orig_size * price, 2)
-            name = f"{market[:12]}_{oid}"
+            name = f"{market}_{oid}"
             positions[name] = {
                 "id": oid,
-                "contract": market[:15],
-                "side": side_str,
-                "size": dollar_val,
-                "entry_price": price,
+                "contract": f"{market}...",
+                "side": f"{order.get('side', 'BUY')} {outcome}",
+                "size": round(float(order.get("original_size", 0)) * float(order.get("price", 0)), 2),
+                "entry_price": float(order.get("price", 0)),
                 "exit_price": None,
                 "pnl": 0,
                 "target_price": 0,
-                "status": order.get("status", "open"),
-                "open_time": order.get("created_at", "")[:19] if order.get("created_at") else "",
+                "status": order.get("status", "PENDING"),
+                "open_time": "",
                 "close_time": None,
             }
 

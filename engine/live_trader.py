@@ -138,13 +138,23 @@ class LiveTrader:
             return {"error": str(e)}
 
     def get_open_orders(self) -> list:
-        """Get all open orders."""
+        """Get all open (unfilled) orders."""
         if not self.connected:
             return []
         try:
             return self.client.get_orders()
         except Exception as e:
             print(f"  [LIVE] Orders error: {e}")
+            return []
+
+    def get_filled_trades(self) -> list:
+        """Get all filled/confirmed trades (active positions)."""
+        if not self.connected:
+            return []
+        try:
+            return self.client.get_trades()
+        except Exception as e:
+            print(f"  [LIVE] Trades error: {e}")
             return []
 
     def cancel_all(self) -> bool:
