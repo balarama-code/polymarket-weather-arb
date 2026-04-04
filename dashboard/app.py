@@ -328,6 +328,7 @@ def engine_loop():
                                 "size": trade_size,
                                 "price": opp["market_prob"],
                                 "edge": opp["abs_edge"],
+                                "pnl": 0,  # Unknown until resolved
                                 "status": "filled",
                             })
                             engine_state["live_trade_history"] = engine_state["live_trade_history"][-20:]
@@ -493,16 +494,20 @@ def api_state():
             daily_var_usd = round(abs(float(np.percentile(trade_pnls, 5))), 2)
             daily_var = round(daily_var_usd / balance * 100, 1) if balance > 0 else 0
 
-        # Kelly from win rate
+        # Kelly from win rate (safe against missing/zero pnl)
+        kelly_f = round(balance * 0.25, 2)
         if trade_count > 0 and wins > 0:
-            avg_win = np.mean([t["pnl"] for t in engine_state["live_trade_history"] if t.get("pnl", 0) > 0]) if wins > 0 else 0
-            avg_loss = abs(np.mean([t["pnl"] for t in engine_state["live_trade_history"] if t.get("pnl", 0) <= 0])) if (trade_count - wins) > 0 else 1
-            b = avg_win / avg_loss if avg_loss > 0 else 1
-            win_p = wins / trade_count
-            kelly_raw = (b * win_p - (1 - win_p)) / b if b > 0 else 0
-            kelly_f = round(max(0, kelly_raw * 0.25 * balance), 2)
-        else:
-            kelly_f = round(balance * 0.25, 2)
+            try:
+                win_pnls = [t.get("pnl", 0) for t in engine_state["live_trade_history"] if t.get("pnl", 0) > 0]
+                loss_pnls = [t.get("pnl", 0) for t in engine_state["live_trade_history"] if t.get("pnl", 0) < 0]
+                avg_win = float(np.mean(win_pnls)) if win_pnls else 1
+                avg_loss = abs(float(np.mean(loss_pnls))) if loss_pnls else 1
+                b = avg_win / avg_loss if avg_loss > 0 else 1
+                win_p = wins / trade_count
+                kelly_raw = (b * win_p - (1 - win_p)) / b if b > 0 else 0
+                kelly_f = round(max(0, kelly_raw * 0.25 * balance), 2)
+            except Exception:
+                pass
 
         # Wx confidence from active opportunities
         opp_edges = [o["abs_edge"] for o in engine_state.get("opportunities", []) if o.get("abs_edge", 0) > 0.05]

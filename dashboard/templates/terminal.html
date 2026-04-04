@@ -639,14 +639,19 @@ function poll() {
       // Active positions — real data with entry price and size
       const posEl = document.getElementById('active-positions');
       const positions = p.positions || {};
-      posEl.innerHTML = Object.entries(positions).map(([name, pos]) =>
-        `<div class="feed-item">
-          <span class="feed-action fired">${pos.side}</span>
-          <span class="feed-contract">${name}</span>
-          <span style="color:#556">@${pos.entry_price.toFixed(2)}</span>
-          <span style="color:#00ccff;margin-left:auto">$${pos.size.toFixed(2)}</span>
-        </div>`
-      ).join('') || '<div style="color:#334">No active positions</div>';
+      posEl.innerHTML = Object.entries(positions).map(([name, pos]) => {
+        const price = (pos.entry_price || 0).toFixed(2);
+        const sz = (pos.size || 0).toFixed(2);
+        const side = pos.side || 'BUY';
+        const contract = pos.contract || name;
+        const statusColor = pos.status === 'LIVE' ? '#00ff88' : '#ffaa00';
+        return `<div class="feed-item">
+          <span class="feed-action" style="color:${statusColor};font-weight:700">${side}</span>
+          <span class="feed-contract">${contract}</span>
+          <span style="color:#556">@${price}</span>
+          <span style="color:#00ccff;margin-left:auto">$${sz}</span>
+        </div>`;
+      }).join('') || '<div style="color:#334">No active positions</div>';
 
       // Equity curve
       const eq = p.equity_curve || [];
