@@ -27,8 +27,19 @@ from config import INITIAL_CAPITAL, WEATHER_MODELS, CITIES, MAX_POSITION_SIZE
 
 app = Flask(__name__)
 
-# Global state
-engine_state = {
+STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "engine_state.json")
+
+# Keys to persist across restarts
+PERSIST_KEYS = [
+    "cycle", "start_time", "live_feed", "execution_log",
+    "live_balance", "live_initial_balance", "live_pnl",
+    "live_trade_count", "live_wins", "live_trade_history",
+    "live_equity_curve", "_active_markets_cache",
+    "_market_prices_cache",
+]
+
+# Default state
+DEFAULT_STATE = {
     "running": False,
     "cycle": 0,
     "mode": "DRY_RUN",
@@ -41,7 +52,6 @@ engine_state = {
     "wx_correlation": 0,
     "real_markets": {},
     "opportunities": [],
-    # LIVE mode wallet data
     "live_balance": 0.0,
     "live_initial_balance": 0.0,
     "live_pnl": 0.0,
@@ -50,7 +60,40 @@ engine_state = {
     "live_wins": 0,
     "live_trade_history": [],
     "live_equity_curve": [],
+    "_active_markets_cache": {},
+    "_market_prices_cache": {},
 }
+
+
+def load_state() -> dict:
+    """Load persisted state from disk, merge with defaults."""
+    state = dict(DEFAULT_STATE)
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r") as f:
+                saved = json.load(f)
+            for key in PERSIST_KEYS:
+                if key in saved:
+                    state[key] = saved[key]
+            print(f"  [STATE] Restored: cycle={state['cycle']}, trades={state['live_trade_count']}, equity_pts={len(state['live_equity_curve'])}")
+    except Exception as e:
+        print(f"  [STATE] Load error: {e}")
+    return state
+
+
+def save_state():
+    """Persist key state fields to disk."""
+    try:
+        to_save = {}
+        for key in PERSIST_KEYS:
+            to_save[key] = engine_state.get(key)
+        with open(STATE_FILE, "w") as f:
+            json.dump(to_save, f)
+    except Exception as e:
+        print(f"  [STATE] Save error: {e}")
+
+
+engine_state = load_state()
 
 executor = Executor(INITIAL_CAPITAL)  # Only used in DRY_RUN
 live_trader = None
@@ -134,7 +177,9 @@ def engine_loop():
     global live_trader
 
     engine_state["running"] = True
-    engine_state["start_time"] = datetime.utcnow().isoformat()
+    # Keep original start_time if restored, otherwise set new
+    if not engine_state.get("start_time"):
+        engine_state["start_time"] = datetime.utcnow().isoformat()
 
     # Check if live mode
     is_live = os.environ.get("ENGINE_MODE") == "LIVE"
@@ -145,10 +190,13 @@ def engine_loop():
         if live_trader.connect():
             balance = live_trader.get_balance()
             engine_state["live_balance"] = balance
-            engine_state["live_initial_balance"] = balance
-            engine_state["live_equity_curve"] = [
+            # Only set initial_balance if not restored from saved state
+            if engine_state["live_initial_balance"] == 0:
+                engine_state["live_initial_balance"] = balance
+            # Append to existing equity curve (don't reset)
+            engine_state["live_equity_curve"].append(
                 (datetime.utcnow().isoformat(), round(balance, 2))
-            ]
+            )
             add_log(f"wallet connected, balance: ${balance:.2f} USDC")
             add_log(f"max position: ${live_trader.max_position}")
         else:
@@ -266,17 +314,27 @@ def engine_loop():
                 engine_state["live_open_orders"] = orders
                 engine_state["live_filled_trades"] = filled
 
-                # Check which markets are still active (not closed/resolved)
+                # Check which markets are still active + fetch current prices
                 market_ids = set(tr.get("market", "") for tr in filled)
                 active_markets = engine_state.get("_active_markets_cache", {})
+                market_prices = engine_state.get("_market_prices_cache", {})
                 for mid in market_ids:
-                    if mid and mid not in active_markets:
+                    if mid and (mid not in active_markets or active_markets.get(mid, False)):
                         try:
                             mdata = live_trader.client.get_market(mid)
-                            active_markets[mid] = not mdata.get("closed", True)
+                            is_active = not mdata.get("closed", True)
+                            active_markets[mid] = is_active
+                            # Store current prices per outcome for active markets
+                            if is_active:
+                                for tok in mdata.get("tokens", []):
+                                    outcome = tok.get("outcome", "")
+                                    price = float(tok.get("price", 0))
+                                    market_prices[f"{mid}|{outcome}"] = price
                         except Exception:
-                            active_markets[mid] = False
+                            if mid not in active_markets:
+                                active_markets[mid] = False
                 engine_state["_active_markets_cache"] = active_markets
+                engine_state["_market_prices_cache"] = market_prices
 
                 active_count = sum(1 for mid in market_ids if active_markets.get(mid, False))
                 add_log(f"wallet: ${balance:.2f} USDC | orders: {len(orders)} | active positions: {active_count}")
@@ -435,6 +493,8 @@ def engine_loop():
         except Exception as e:
             add_log(f"error: {str(e)[:60]}")
 
+        # Persist state to disk every cycle
+        save_state()
         time.sleep(5)
 
 
@@ -492,12 +552,20 @@ def api_state():
                 pos_agg[key]["sell_revenue"] += size * price
             pos_agg[key]["fills"] += 1
 
+        price_cache = engine_state.get("_market_prices_cache", {})
         for key, agg in pos_agg.items():
             net_shares = agg["buy_shares"] - agg["sell_shares"]
             if net_shares < 1:
                 continue
             avg_price = round(agg["buy_cost"] / agg["buy_shares"], 4) if agg["buy_shares"] > 0 else 0
             cost_basis = round(agg["buy_cost"] - agg["sell_revenue"], 2)
+
+            # Current market price for this outcome
+            current_price = price_cache.get(key, avg_price)
+            # Unrealized PnL = (current_price - avg_entry) * net_shares
+            unrealized_pnl = round((current_price - avg_price) * net_shares, 2)
+            current_value = round(current_price * net_shares, 2)
+
             short_market = agg["market"][:10]
             name = f"{short_market}_{agg['outcome']}"
             positions[name] = {
@@ -506,8 +574,9 @@ def api_state():
                 "side": f"BUY {agg['outcome']}",
                 "size": max(0, cost_basis),
                 "entry_price": avg_price,
-                "exit_price": None,
-                "pnl": round(agg["sell_revenue"] - (agg["sell_shares"] * avg_price), 2),
+                "current_price": current_price,
+                "current_value": current_value,
+                "pnl": unrealized_pnl,
                 "target_price": 0,
                 "status": f"{net_shares:.0f} shares",
                 "open_time": "",

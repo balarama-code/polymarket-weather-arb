@@ -636,20 +636,28 @@ function poll() {
         }
       }).join('');
 
-      // Active positions — real data with entry price and size
+      // Active positions — with PnL per position
       const posEl = document.getElementById('active-positions');
       const positions = p.positions || {};
       posEl.innerHTML = Object.entries(positions).map(([name, pos]) => {
-        const price = (pos.entry_price || 0).toFixed(2);
-        const sz = (pos.size || 0).toFixed(2);
+        const entry = (pos.entry_price || 0).toFixed(3);
+        const curr = (pos.current_price || pos.entry_price || 0).toFixed(3);
+        const pnlVal = pos.pnl || 0;
+        const pnlStr = (pnlVal >= 0 ? '+$' : '-$') + Math.abs(pnlVal).toFixed(2);
+        const pnlColor = pnlVal >= 0 ? '#00ff88' : '#ff4466';
         const side = pos.side || 'BUY';
-        const contract = pos.contract || name;
-        const statusColor = pos.status === 'LIVE' ? '#00ff88' : '#ffaa00';
-        return `<div class="feed-item">
-          <span class="feed-action" style="color:${statusColor};font-weight:700">${side}</span>
-          <span class="feed-contract">${contract}</span>
-          <span style="color:#556">@${price}</span>
-          <span style="color:#00ccff;margin-left:auto">$${sz}</span>
+        const shares = pos.status || '';
+        const cost = (pos.size || 0).toFixed(2);
+        const val = (pos.current_value || pos.size || 0).toFixed(2);
+        return `<div style="padding:3px 0;border-bottom:1px solid #1a1a2e;font-size:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="color:#00ccff;font-weight:700">${side}</span>
+            <span style="color:${pnlColor};font-weight:700">${pnlStr}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;color:#556;font-size:9px;margin-top:1px">
+            <span>${shares} | cost $${cost}</span>
+            <span>entry ${entry} &rarr; ${curr}</span>
+          </div>
         </div>`;
       }).join('') || '<div style="color:#334">No active positions</div>';
 
@@ -690,7 +698,7 @@ function setBar(name, value, max) {
 initCharts();
 drawSentiment();
 drawLatency();
-setInterval(poll, 2000);
+setInterval(poll, 5000);
 poll();
 
 // Random PID
