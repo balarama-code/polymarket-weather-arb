@@ -204,8 +204,14 @@ def engine_loop():
             # 3. Compare forecasts vs market odds
             opportunities = []
 
+            today_str = datetime.utcnow().strftime("%Y-%m-%d")
+
             for event_key, markets in real_events.items():
                 city, date = event_key.split("|")
+
+                # Skip expired markets (past dates)
+                if date < today_str:
+                    continue
 
                 forecast_temp = get_forecast_for_city(city, forecasts)
                 if forecast_temp is None:

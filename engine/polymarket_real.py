@@ -239,6 +239,7 @@ def calc_forecast_edge(market: dict, forecast_temp_c: float, forecast_std: float
 
     return {
         "market_id": market["id"],
+        "condition_id": market.get("condition_id", ""),
         "question": market["question"],
         "city": market["city"],
         "date": market["target_date"],
