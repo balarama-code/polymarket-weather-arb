@@ -280,11 +280,12 @@ def engine_loop():
                     trade_size = min(
                         live_trader.max_position,
                         balance * 0.4,  # Max 40% of balance per trade
-                        max(0.5, balance * opp["abs_edge"] * 5),
+                        max(1.1, balance * opp["abs_edge"] * 5),
                     )
                     trade_size = round(trade_size, 2)
 
-                    if trade_size < 0.50:
+                    # Polymarket minimum order is $1
+                    if trade_size < 1.0:
                         continue
 
                     short_name = f"{opp['city'][:10]}.{opp['date'][-2:]}"
@@ -303,11 +304,17 @@ def engine_loop():
                         if opp["side"] == "YES":
                             result = live_trader.buy_yes(token_id, trade_size, opp["market_prob"])
                         else:
-                            result = live_trader.buy_no(token_id, trade_size, opp["market_prob"])
+                            # NO price = 1 - YES price
+                            no_price = round(1.0 - opp["market_prob"], 4)
+                            result = live_trader.buy_no(token_id, trade_size, no_price)
 
                         if "error" in result:
-                            add_log(f"LIVE ORDER FAILED: {result['error'][:60]}")
-                            add_feed("FAILED", short_name, 0, result["error"][:30])
+                            err = result["error"]
+                            if "market not found" in err:
+                                add_log(f"skip {short_name}: not on CLOB")
+                            else:
+                                add_log(f"ORDER FAIL: {err[:60]}")
+                                add_feed("FAILED", short_name, 0, err[:30])
                         else:
                             add_log(f"LIVE ORDER OK: {short_name} {opp['side']} ${trade_size}")
                             add_feed("LIVE", short_name, 0,
@@ -441,21 +448,28 @@ def api_state():
         wins = engine_state["live_wins"]
         win_rate = (wins / trade_count * 100) if trade_count > 0 else 0
 
-        # Open orders as positions
+        # Open orders as positions (CLOB order format)
         positions = {}
         for order in engine_state["live_open_orders"]:
-            name = order.get("market", order.get("id", "?"))[:15]
+            oid = order.get("id", "?")[:8]
+            market = order.get("market", oid)
+            outcome = order.get("outcome", "")
+            side_str = f"{order.get('side', 'BUY')} {outcome}".strip()
+            orig_size = float(order.get("original_size", 0))
+            price = float(order.get("price", 0))
+            dollar_val = round(orig_size * price, 2)
+            name = f"{market[:12]}_{oid}"
             positions[name] = {
-                "id": order.get("id", ""),
-                "contract": name,
-                "side": order.get("side", "BUY"),
-                "size": float(order.get("size", 0)),
-                "entry_price": float(order.get("price", 0)),
+                "id": oid,
+                "contract": market[:15],
+                "side": side_str,
+                "size": dollar_val,
+                "entry_price": price,
                 "exit_price": None,
                 "pnl": 0,
                 "target_price": 0,
                 "status": order.get("status", "open"),
-                "open_time": order.get("created_at", ""),
+                "open_time": order.get("created_at", "")[:19] if order.get("created_at") else "",
                 "close_time": None,
             }
 

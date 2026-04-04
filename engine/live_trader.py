@@ -101,7 +101,12 @@ class LiveTrader:
             return {"error": str(e)}
 
     def buy_no(self, token_id: str, amount: float, price: float) -> dict:
-        """Buy NO tokens (= sell YES at complement price)."""
+        """
+        Buy NO tokens directly.
+        token_id: the NO token ID
+        amount: USD amount to spend
+        price: NO token price (0.01 - 0.99)
+        """
         if not self.connected:
             return {"error": "Not connected"}
 
@@ -111,8 +116,8 @@ class LiveTrader:
             order = self.client.create_and_post_order(
                 OrderArgs(
                     token_id=token_id,
-                    price=round(1.0 - price, 4),
-                    size=round(amount / (1.0 - price), 2),
+                    price=price,
+                    size=round(amount / price, 2),
                     side=BUY,
                 ),
             )
