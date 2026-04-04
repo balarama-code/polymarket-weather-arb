@@ -86,17 +86,23 @@ class LiveTrader:
             return {"error": "Not connected"}
 
         amount = min(amount, self.max_position)
+        size = round(amount / price, 2)
+
+        # Polymarket minimum: 5 shares
+        if size < 5:
+            size = 5.0
+            amount = round(size * price, 2)
 
         try:
             order = self.client.create_and_post_order(
                 OrderArgs(
                     token_id=token_id,
                     price=price,
-                    size=round(amount / price, 2),
+                    size=size,
                     side=BUY,
                 ),
             )
-            return {"status": "ok", "order": order}
+            return {"status": "ok", "order": order, "amount": amount, "size": size}
         except Exception as e:
             return {"error": str(e)}
 
@@ -111,17 +117,23 @@ class LiveTrader:
             return {"error": "Not connected"}
 
         amount = min(amount, self.max_position)
+        size = round(amount / price, 2)
+
+        # Polymarket minimum: 5 shares
+        if size < 5:
+            size = 5.0
+            amount = round(size * price, 2)
 
         try:
             order = self.client.create_and_post_order(
                 OrderArgs(
                     token_id=token_id,
                     price=price,
-                    size=round(amount / price, 2),
+                    size=size,
                     side=BUY,
                 ),
             )
-            return {"status": "ok", "order": order}
+            return {"status": "ok", "order": order, "amount": amount, "size": size}
         except Exception as e:
             return {"error": str(e)}
 
