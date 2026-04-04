@@ -266,7 +266,20 @@ def engine_loop():
                 engine_state["live_open_orders"] = orders
                 engine_state["live_filled_trades"] = filled
 
-                add_log(f"wallet: ${balance:.2f} USDC | orders: {len(orders)} | positions: {len(filled)}")
+                # Check which markets are still active (not closed/resolved)
+                market_ids = set(tr.get("market", "") for tr in filled)
+                active_markets = engine_state.get("_active_markets_cache", {})
+                for mid in market_ids:
+                    if mid and mid not in active_markets:
+                        try:
+                            mdata = live_trader.client.get_market(mid)
+                            active_markets[mid] = not mdata.get("closed", True)
+                        except Exception:
+                            active_markets[mid] = False
+                engine_state["_active_markets_cache"] = active_markets
+
+                active_count = sum(1 for mid in market_ids if active_markets.get(mid, False))
+                add_log(f"wallet: ${balance:.2f} USDC | orders: {len(orders)} | active positions: {active_count}")
 
                 # Execute on best opportunities (only if we have balance)
                 opportunities.sort(key=lambda x: x["abs_edge"], reverse=True)
@@ -451,12 +464,16 @@ def api_state():
         wins = engine_state["live_wins"]
         win_rate = (wins / trade_count * 100) if trade_count > 0 else 0
 
-        # Aggregate filled trades into net positions by market+outcome
+        # Aggregate filled trades into net positions — only ACTIVE markets
         positions = {}
         filled = engine_state.get("live_filled_trades", [])
-        pos_agg = {}  # {market|outcome: {buy_shares, buy_cost, sell_shares, ...}}
+        active_cache = engine_state.get("_active_markets_cache", {})
+        pos_agg = {}
         for trade in filled:
             market = trade.get("market", "?")
+            # Skip closed/resolved markets
+            if not active_cache.get(market, False):
+                continue
             outcome = trade.get("outcome", "?")
             key = f"{market}|{outcome}"
             size = float(trade.get("size", 0))
@@ -477,7 +494,7 @@ def api_state():
 
         for key, agg in pos_agg.items():
             net_shares = agg["buy_shares"] - agg["sell_shares"]
-            if net_shares < 1:  # Skip closed/near-zero positions
+            if net_shares < 1:
                 continue
             avg_price = round(agg["buy_cost"] / agg["buy_shares"], 4) if agg["buy_shares"] > 0 else 0
             cost_basis = round(agg["buy_cost"] - agg["sell_revenue"], 2)
