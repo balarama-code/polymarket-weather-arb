@@ -23,7 +23,7 @@ from engine.data_logger import log_odds, log_forecasts, log_trade, get_logged_st
 from engine.live_trader import LiveTrader, check_env
 from engine.strategy import ForecastArbStrategy
 from engine.executor import Executor
-from config import INITIAL_CAPITAL, WEATHER_MODELS, CITIES, MAX_POSITION_SIZE
+from config import INITIAL_CAPITAL, WEATHER_MODELS, CITIES, MAX_POSITION_SIZE, CUT_LOSS_PCT, TIME_EXIT_HOURS
 
 app = Flask(__name__)
 
@@ -35,7 +35,7 @@ PERSIST_KEYS = [
     "live_balance", "live_initial_balance", "live_pnl",
     "live_trade_count", "live_wins", "live_trade_history",
     "live_equity_curve", "_active_markets_cache",
-    "_market_prices_cache",
+    "_market_prices_cache", "_market_end_dates", "_market_token_ids",
 ]
 
 # Default state
@@ -62,6 +62,8 @@ DEFAULT_STATE = {
     "live_equity_curve": [],
     "_active_markets_cache": {},
     "_market_prices_cache": {},
+    "_market_end_dates": {},
+    "_market_token_ids": {},
 }
 
 
@@ -314,27 +316,35 @@ def engine_loop():
                 engine_state["live_open_orders"] = orders
                 engine_state["live_filled_trades"] = filled
 
-                # Check which markets are still active + fetch current prices
+                # Check which markets are still active + fetch current prices + end dates
                 market_ids = set(tr.get("market", "") for tr in filled)
                 active_markets = engine_state.get("_active_markets_cache", {})
                 market_prices = engine_state.get("_market_prices_cache", {})
+                market_end_dates = engine_state.get("_market_end_dates", {})
+                market_token_ids = engine_state.get("_market_token_ids", {})
                 for mid in market_ids:
                     if mid and (mid not in active_markets or active_markets.get(mid, False)):
                         try:
                             mdata = live_trader.client.get_market(mid)
                             is_active = not mdata.get("closed", True)
                             active_markets[mid] = is_active
-                            # Store current prices per outcome for active markets
                             if is_active:
+                                end_date = mdata.get("end_date_iso", "")
+                                if end_date:
+                                    market_end_dates[mid] = end_date
                                 for tok in mdata.get("tokens", []):
                                     outcome = tok.get("outcome", "")
                                     price = float(tok.get("price", 0))
+                                    token_id = str(tok.get("token_id", ""))
                                     market_prices[f"{mid}|{outcome}"] = price
-                        except Exception:
-                            if mid not in active_markets:
-                                active_markets[mid] = False
+                                    market_token_ids[f"{mid}|{outcome}"] = token_id
+                        except Exception as e:
+                            # Market not found (404) or other error → mark inactive
+                            active_markets[mid] = False
                 engine_state["_active_markets_cache"] = active_markets
                 engine_state["_market_prices_cache"] = market_prices
+                engine_state["_market_end_dates"] = market_end_dates
+                engine_state["_market_token_ids"] = market_token_ids
 
                 active_count = sum(1 for mid in market_ids if active_markets.get(mid, False))
                 add_log(f"wallet: ${balance:.2f} USDC | orders: {len(orders)} | active positions: {active_count}")
@@ -415,6 +425,99 @@ def engine_loop():
 
                     except Exception as e:
                         add_log(f"LIVE TRADE ERROR: {str(e)[:60]}")
+
+                # === CUT-LOSS + TIME-EXIT ===
+                # Build net positions from filled trades (active markets only)
+                from datetime import timezone
+                now_utc = datetime.now(timezone.utc)
+                pos_for_exit = {}
+                for trade in filled:
+                    mid = trade.get("market", "")
+                    if not active_markets.get(mid, False):
+                        continue
+                    outcome = trade.get("outcome", "?")
+                    key = f"{mid}|{outcome}"
+                    size = float(trade.get("size", 0))
+                    price = float(trade.get("price", 0))
+                    side = trade.get("side", "BUY")
+                    if key not in pos_for_exit:
+                        pos_for_exit[key] = {"buy_shares": 0, "buy_cost": 0,
+                                             "sell_shares": 0, "market": mid, "outcome": outcome}
+                    if side == "BUY":
+                        pos_for_exit[key]["buy_shares"] += size
+                        pos_for_exit[key]["buy_cost"] += size * price
+                    else:
+                        pos_for_exit[key]["sell_shares"] += size
+
+                for key, pos in pos_for_exit.items():
+                    net_shares = pos["buy_shares"] - pos["sell_shares"]
+                    if net_shares < 5:  # Polymarket minimum sell is 5 shares
+                        continue
+                    avg_entry = pos["buy_cost"] / pos["buy_shares"] if pos["buy_shares"] > 0 else 0
+                    current_price = market_prices.get(key, avg_entry)
+                    token_id = market_token_ids.get(key, "")
+                    mid = pos["market"]
+                    label = f"{mid[:8]}..{pos['outcome']}"
+
+                    if not token_id:
+                        continue
+
+                    sell_reason = None
+
+                    # Skip positions too cheap to sell (min Polymarket price is 0.001)
+                    if current_price < 0.01:
+                        continue
+
+                    # 1) CUT-LOSS: current price dropped > CUT_LOSS_PCT below entry
+                    cut_threshold = avg_entry * (1 - CUT_LOSS_PCT)
+                    if avg_entry > 0.01 and current_price < cut_threshold:
+                        loss_pct = round((1 - current_price / avg_entry) * 100, 1)
+                        sell_reason = f"CUT-LOSS -{loss_pct}% (now {current_price:.4f})"
+
+                    # 2) TIME-EXIT: market closes within TIME_EXIT_HOURS
+                    end_date_str = market_end_dates.get(mid, "")
+                    if end_date_str and not sell_reason:
+                        try:
+                            end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                            hours_left = (end_dt - now_utc).total_seconds() / 3600
+                            if 0 < hours_left < TIME_EXIT_HOURS:
+                                sell_reason = f"TIME-EXIT {hours_left:.1f}h left"
+                        except Exception:
+                            pass
+
+                    if sell_reason:
+                        # Sell at or slightly below current market for quick fill
+                        sell_price = round(max(0.001, current_price * 0.95), 4)
+                        sell_size = round(net_shares, 2)
+                        result = live_trader.sell(token_id, sell_size, sell_price)
+
+                        if "error" in result:
+                            err = result["error"]
+                            add_log(f"SELL FAIL {label}: {err[:50]}")
+                        else:
+                            pnl_est = round((sell_price - avg_entry) * sell_size, 2)
+                            add_log(f"SELL {sell_reason}: {label} {sell_size:.0f}sh @{sell_price}")
+                            add_feed("SELL", label, pnl_est, sell_reason[:20])
+
+                            engine_state["live_trade_count"] += 1
+                            engine_state["live_trade_history"].append({
+                                "time": datetime.utcnow().strftime("%H:%M:%S"),
+                                "contract": label,
+                                "side": "SELL",
+                                "size": round(sell_size * sell_price, 2),
+                                "price": sell_price,
+                                "edge": 0,
+                                "pnl": pnl_est,
+                                "status": sell_reason[:15],
+                            })
+                            engine_state["live_trade_history"] = engine_state["live_trade_history"][-30:]
+
+                            log_trade(cycle, {
+                                "contract": label, "side": "SELL",
+                                "entry_price": avg_entry, "exit_price": sell_price,
+                                "size": sell_size, "pnl": pnl_est,
+                                "status": sell_reason,
+                            })
 
             # DRY_RUN MODE: simulated executor
             elif not is_live:
@@ -583,8 +686,10 @@ def api_state():
                 "close_time": None,
             }
 
-        # Also add pending open orders
+        # Also add pending BUY orders (skip SELL orders — those are exits)
         for order in engine_state["live_open_orders"]:
+            if order.get("side", "") == "SELL":
+                continue
             oid = order.get("id", "?")[:8]
             market = order.get("market", oid)[:10]
             outcome = order.get("outcome", "")
@@ -592,7 +697,7 @@ def api_state():
             positions[name] = {
                 "id": oid,
                 "contract": f"{market}...",
-                "side": f"{order.get('side', 'BUY')} {outcome}",
+                "side": f"BUY {outcome}",
                 "size": round(float(order.get("original_size", 0)) * float(order.get("price", 0)), 2),
                 "entry_price": float(order.get("price", 0)),
                 "exit_price": None,

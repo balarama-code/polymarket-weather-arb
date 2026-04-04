@@ -137,6 +137,54 @@ class LiveTrader:
         except Exception as e:
             return {"error": str(e)}
 
+    def get_token_balance(self, token_id: str) -> float:
+        """Get actual on-chain balance for a specific token."""
+        if not self.connected:
+            return 0.0
+        try:
+            params = BalanceAllowanceParams(
+                asset_type=AssetType.CONDITIONAL, token_id=token_id
+            )
+            bal = self.client.get_balance_allowance(params)
+            return float(bal.get("balance", 0)) / 1e6
+        except Exception as e:
+            print(f"  [LIVE] Token balance error: {e}")
+            return 0.0
+
+    def sell(self, token_id: str, size: float, price: float) -> dict:
+        """
+        Sell tokens (exit a position).
+        Checks actual token balance to avoid over-selling.
+        token_id: the token ID of the shares to sell
+        size: number of shares to sell (will be capped to actual balance)
+        price: minimum price per share (0.01 - 0.99)
+        """
+        if not self.connected:
+            return {"error": "Not connected"}
+
+        # Check actual token balance
+        actual = self.get_token_balance(token_id)
+        if actual < 5:
+            return {"error": f"Balance too low: {actual:.2f} shares (min 5)"}
+
+        # Sell up to actual balance, floor to avoid rounding issues
+        size = min(size, int(actual))
+        if size < 5:
+            return {"error": f"Sell size {size} < min 5 (balance: {actual:.2f})"}
+
+        try:
+            order = self.client.create_and_post_order(
+                OrderArgs(
+                    token_id=token_id,
+                    price=price,
+                    size=round(size, 2),
+                    side=SELL,
+                ),
+            )
+            return {"status": "ok", "order": order, "size": size, "price": price}
+        except Exception as e:
+            return {"error": str(e)}
+
     def get_open_orders(self) -> list:
         """Get all open (unfilled) orders."""
         if not self.connected:

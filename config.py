@@ -10,6 +10,10 @@ MIN_EDGE = 0.05               # Minimum 5% edge to fire
 MAX_EXPOSURE = 0.30           # Max 30% of capital exposed at once
 MAX_POSITIONS = 8             # Max simultaneous positions
 
+# Exit rules
+CUT_LOSS_PCT = 0.25           # Cut loss at 25% drop from entry price
+TIME_EXIT_HOURS = 3           # Auto-sell 3 hours before market closes
+
 # Timing
 WEATHER_CHECK_INTERVAL = 300  # Seconds between forecast cycles
 CYCLE_SPEED_DRY_RUN = 2       # Seconds between cycles in dry-run
